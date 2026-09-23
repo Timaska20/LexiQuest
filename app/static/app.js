@@ -189,7 +189,7 @@ async function directAnkiCard(card) {
   const note = card.anki_note || {
     deckName:'Default',
     modelName:'Basic (type in the answer)',
-    fields:{Front:blankWord(card.source_phrase, card.source_word), Back:`${card.target_word || ''}${sound}`},
+    fields:{Front:blankWord(card.source_phrase, card.source_word), Back:`<b>${escapeHtml(card.source_word || '')}</b>${card.pronunciation ? '<br>[' + escapeHtml(String(card.pronunciation).replace(/^[/\\[]|[/\\]]$/g, '')) + ']' : ''}<br>${escapeHtml(card.target_word || '')}${sound}`},
     options:{allowDuplicate:false},
     tags:['lexiquest'],
   };
@@ -1334,7 +1334,7 @@ async function lookupWord() {
         try {
           await api(`/api/phrases/${phraseId}/flashcards`, {
             method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({source_word:word, target_word:target, dictionary_name:r.dictionary}),
+            body:JSON.stringify({source_word:word, target_word:target, dictionary_name:r.dictionary, pronunciation:article.pronunciation || null}),
           });
           const result = await pushOrQueueAnki({
             video_id:state.selectedVideo.id,
