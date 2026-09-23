@@ -30,7 +30,7 @@ def now():
     return datetime.now(timezone.utc)
 
 
-app = FastAPI(title="LexiQuest Cake", version="0.10.0")
+app = FastAPI(title="LexiQuest Cake", version="0.11.0")
 app.add_middleware(BasicAuthMiddleware)
 
 
@@ -54,7 +54,7 @@ def serialize_video(video: Video, session: Session) -> dict:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "service": "lexiquest-cake", "version": "0.10.0"}
+    return {"ok": True, "service": "lexiquest-cake", "version": "0.11.0"}
 
 
 
