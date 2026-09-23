@@ -208,6 +208,7 @@ async function queueAnkiCard(payload) {
 async function pushOrQueueAnki(payload) {
   try {
     const pending = await queueAnkiCard(payload);
+    if (pending.status === 'synced') return {direct:true, noteId:pending.anki_note_id, existing:true};
     try {
       const noteId = await directAnkiCard({...pending, audio_url:`/api/anki/pending/${pending.id}/audio`});
       await api(`/api/anki/pending/${pending.id}/synced`, {
