@@ -455,22 +455,35 @@ def delete_video(video_id: str, session: Session = Depends(get_session)):
         if phrase_ids else []
     )
     jobs = session.exec(select(Job).where(Job.video_id == video_id)).all()
+    mined_cards = session.exec(select(MinedCard).where(MinedCard.video_id == video_id)).all()
+    study_sessions = session.exec(select(StudySession).where(StudySession.video_id == video_id)).all()
 
     counts = {
         "phrases": len(phrases),
         "flashcards": len(cards),
         "jobs": len(jobs),
+        "mined_cards": len(mined_cards),
+        "study_sessions_detached": len(study_sessions),
     }
     video_file_path = video.file_path
 
     # Delete relational data first. Media cleanup happens immediately after a
     # successful commit and is restricted to LexiQuest-owned directories.
+    #
+    # Pending Anki cards depend on both video and phrase, so remove them before
+    # deleting phrases. Study sessions are analytics/history and should survive
+    # lesson deletion; detach them from the video instead.
+    for item in mined_cards:
+        session.delete(item)
     for item in cards:
         session.delete(item)
     for item in phrases:
         session.delete(item)
     for item in jobs:
         session.delete(item)
+    for item in study_sessions:
+        item.video_id = None
+        session.add(item)
     session.delete(video)
     session.commit()
 
@@ -482,6 +495,9 @@ def delete_video(video_id: str, session: Session = Depends(get_session)):
     audio_dir = settings.media_root / "audio"
     for clip in audio_dir.glob(f"lq_{video_id}_*.mp3"):
         _safe_unlink(clip, audio_dir, cleanup_errors)
+    for card in mined_cards:
+        if card.id is not None:
+            _safe_unlink(audio_dir / f"lq_pending_{card.id}.mp3", audio_dir, cleanup_errors)
 
     # Remove any unfinished ingestion/VOT work directories and an uploaded
     # source file that may have survived an interrupted worker.
