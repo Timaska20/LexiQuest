@@ -119,6 +119,26 @@ def daily_task(session: Session = Depends(get_session)):
     return task
 
 
+@app.get("/api/anki/state")
+def anki_state(video_id: str | None = None, session: Session = Depends(get_session)):
+    statement = select(MinedCard)
+    if video_id:
+        statement = statement.where(MinedCard.video_id == video_id)
+    cards = session.exec(statement.order_by(MinedCard.created_at)).all()
+    return [
+        {
+            "id": card.id,
+            "video_id": card.video_id,
+            "phrase_id": card.phrase_id,
+            "source_word": card.source_word,
+            "status": card.status,
+            "anki_note_id": card.anki_note_id,
+            "synced_at": card.synced_at,
+        }
+        for card in cards
+    ]
+
+
 @app.get("/api/anki/pending")
 def pending_anki(session: Session = Depends(get_session)):
     cards = session.exec(
