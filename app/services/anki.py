@@ -29,7 +29,6 @@ MODEL = genanki.Model(
             "name": "Word",
             "qfmt": """
 <div class="word source-word">{{SourceWord}}</div>
-<div class="pronunciation">{{Pronunciation}}</div>
 <div class="context source-context">{{SourcePhrase}}</div>
 <div class="audio">{{Audio}}</div>
 """,
@@ -37,6 +36,7 @@ MODEL = genanki.Model(
 {{FrontSide}}
 <hr>
 <div class="word target-word">{{TargetWord}}</div>
+<div class="pronunciation">{{Pronunciation}}</div>
 <div class="context target-context">{{TargetPhrase}}</div>
 """,
         }
