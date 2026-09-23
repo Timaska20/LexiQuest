@@ -193,12 +193,33 @@ def mark_pending_anki_synced(card_id: int, body: PendingAnkiSynced, session: Ses
     card = session.get(MinedCard, card_id)
     if not card:
         raise HTTPException(404, "Pending card not found")
-    card.status = "synced"
-    card.anki_note_id = body.note_id
-    card.synced_at = now()
-    session.add(card)
+
+    # Anki is the source of truth after a confirmed addNote.
+    # Only delete local card data after AnkiConnect returned a note id and the
+    # browser explicitly acknowledged successful sync through this endpoint.
+    flashcard = None
+    if card.phrase_id is not None:
+        candidates = session.exec(
+            select(Flashcard).where(Flashcard.phrase_id == card.phrase_id)
+        ).all()
+        wanted = (card.source_word or "").strip().casefold()
+        flashcard = next(
+            (
+                item for item in candidates
+                if (item.source_word or "").strip().casefold() == wanted
+            ),
+            None,
+        )
+
+    if flashcard:
+        session.delete(flashcard)
+    session.delete(card)
     session.commit()
-    return {"ok": True}
+    return {
+        "ok": True,
+        "anki_note_id": body.note_id,
+        "deleted_from_lexiquest": True,
+    }
 
 
 @app.post("/api/daily/complete")
