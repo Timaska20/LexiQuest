@@ -20,6 +20,8 @@ const state = {
   recommendedOnly: false,
   watchedHighlightSeconds: new Map(),
   watchedSeconds: new Set(),
+  timeSpentSeconds: 0,
+  lastPlaybackTick: null,
   lookupEvents: new Map(),
   minedCardsCount: 0,
   completionSent: false,
@@ -102,7 +104,16 @@ function applyDailyTaskToVideo() {
 }
 
 function trackPlayback(time) {
-  if (player.paused || player.seeking || !Number.isFinite(time)) return;
+  if (player.paused || player.seeking || !Number.isFinite(time)) {
+    state.lastPlaybackTick = null;
+    return;
+  }
+  const now = performance.now();
+  if (state.lastPlaybackTick !== null) {
+    const delta = Math.max(0, Math.min(2, (now - state.lastPlaybackTick) / 1000));
+    state.timeSpentSeconds += delta;
+  }
+  state.lastPlaybackTick = now;
   state.watchedSeconds.add(Math.floor(time));
   state.recommendedMoments.forEach((r, idx) => {
     if (time >= r.start && time < r.end) {
@@ -271,7 +282,7 @@ async function sendDailyCompletion() {
       body:JSON.stringify({
         date: state.dailyTask.date,
         video_id: state.selectedVideo.id,
-        time_spent_seconds: state.watchedSeconds.size,
+        time_spent_seconds: Math.round(state.timeSpentSeconds),
         completed_highlights: completedHighlights(),
         looked_up_words: events.map(x => x.word),
         lookup_events: events,
@@ -311,6 +322,8 @@ function clearSelectedLesson() {
   state.mode = 'watch';
   state.seenPhraseIds = new Set();
   state.watchedSeconds = new Set();
+  state.timeSpentSeconds = 0;
+  state.lastPlaybackTick = null;
   state.watchedHighlightSeconds = new Map();
   state.lookupEvents = new Map();
   state.minedCardsCount = 0;
@@ -1358,6 +1371,10 @@ $('syncAnkiNow')?.addEventListener('click', async () => {
       target_phrase:card.target_phrase || phrase.translated_text || '',
       clip_start:card.clip_start ?? phrase.start_time, clip_end:card.clip_end ?? phrase.end_time,
     });
+    const key = String(card.source_word || '').toLocaleLowerCase();
+    const event = state.lookupEvents.get(key) || {word:card.source_word, context:card.source_phrase || phrase.source_text || '', frequency:1, mined:false};
+    event.mined = true;
+    state.lookupEvents.set(key, event);
     if (result.direct) direct++; else queued++;
   }
   $('syncAnkiNow').textContent = queued ? `✓ ${direct} в Anki · ${queued} в очереди` : `✓ ${direct} отправлено в Anki`;
