@@ -553,6 +553,7 @@ def list_flashcards(video_id: str, session: Session = Depends(get_session)):
             "source_word": c.source_word,
             "target_word": c.target_word,
             "dictionary_name": c.dictionary_name,
+            "pronunciation": c.pronunciation,
             "source_phrase": c.source_phrase_snapshot or phrases[c.phrase_id].source_text,
             "target_phrase": c.target_phrase_snapshot if c.target_phrase_snapshot is not None else phrases[c.phrase_id].translated_text,
             "clip_start": c.clip_start if c.clip_start is not None else phrases[c.phrase_id].start_time,
@@ -576,6 +577,7 @@ def save_flashcard(phrase_id: int, body: FlashcardCreate, session: Session = Dep
             card.source_word = source
             card.target_word = target
             card.dictionary_name = body.dictionary_name
+            card.pronunciation = body.pronunciation
             card.source_phrase_snapshot = phrase.source_text
             card.target_phrase_snapshot = phrase.translated_text or ""
             card.clip_start = phrase.start_time
@@ -589,6 +591,7 @@ def save_flashcard(phrase_id: int, body: FlashcardCreate, session: Session = Dep
         source_word=source,
         target_word=target,
         dictionary_name=body.dictionary_name,
+        pronunciation=body.pronunciation,
         source_phrase_snapshot=phrase.source_text,
         target_phrase_snapshot=phrase.translated_text or "",
         clip_start=phrase.start_time,
