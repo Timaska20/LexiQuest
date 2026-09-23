@@ -136,10 +136,18 @@ def pending_anki(session: Session = Depends(get_session)):
 
 @app.post("/api/anki/pending")
 def create_pending_anki(body: PendingAnkiCreate, session: Session = Depends(get_session)):
-    card = MinedCard(**body.model_dump(), status="pending_anki")
-    session.add(card)
-    session.commit()
-    session.refresh(card)
+    existing = session.exec(
+        select(MinedCard).where(
+            MinedCard.video_id == body.video_id,
+            MinedCard.phrase_id == body.phrase_id,
+            MinedCard.source_word == body.source_word,
+        ).order_by(MinedCard.id.desc())
+    ).first()
+    card = existing or MinedCard(**body.model_dump(), status="pending_anki")
+    if not existing:
+        session.add(card)
+        session.commit()
+        session.refresh(card)
     return {
         **card.model_dump(),
         "anki_note": build_ankiconnect_note(card, f"lq_pending_{card.id}.mp3" if card.clip_start is not None and card.clip_end is not None else None),
