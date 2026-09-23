@@ -135,6 +135,9 @@ def build_ankiconnect_note(card, audio_filename: str | None = None) -> dict:
         back_parts.append(f"[{pronunciation.strip('[]/')}]")
     if target_word:
         back_parts.append(target_word)
+    target_phrase = html.escape((getattr(card, "target_phrase", None) or "").strip())
+    if target_phrase:
+        back_parts.append(f"<hr><div><small>Перевод фразы</small><br>{target_phrase}</div>")
     if audio_filename:
         back_parts.append(f"[sound:{audio_filename}]")
     back = "<br>".join(back_parts)
