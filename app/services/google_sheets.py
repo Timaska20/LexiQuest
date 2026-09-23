@@ -23,10 +23,12 @@ SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets"
 _PROGRESS_HEADERS = {
     "date": ["date", "дата"],
     "status": ["status", "статус"],
-    "video_url": ["video url", "video_url", "youtube", "видео", "ссылка", "ссылка на видео"],
-    "grammar_topic": ["grammar topic", "grammar_topic", "grammar", "грамматика", "murphy", "мёрфи", "мерфи"],
+    "video_title": ["video title", "video_title", "title", "название видео", "название"],
+    "video_url": ["video url", "video_url", "youtube url", "youtube", "видео", "ссылка", "ссылка на видео"],
+    "grammar_topic": ["murphy topic", "grammar topic", "grammar_topic", "grammar", "грамматика", "murphy", "мёрфи", "мерфи"],
     "notes": ["notes", "note", "заметки", "примечания", "описание", "description"],
-    "recommended": ["recommended moments", "recommended_moments", "моменты", "рекомендуемые моменты", "таймкоды", "timestamps"],
+    "recommended": ["key moments", "recommended moments", "recommended_moments", "моменты", "рекомендуемые моменты", "таймкоды", "timestamps"],
+    "duration": ["duration", "длительность"],
     "new_cards": ["new cards count", "new_cards_count", "new cards", "новые карточки", "карточки"],
 }
 
@@ -242,7 +244,14 @@ def _parse_date(value: str) -> str | None:
 
 
 def _youtube_url(text: str) -> str:
-    match = re.search(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be)/[^\s,;]+", text or "", re.I)
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    match = re.search(
+        r"https?://(?:(?:www|m)\.)?(?:youtube\.com|youtu\.be)/[^\s,;]+",
+        raw,
+        re.I,
+    )
     return match.group(0).rstrip(").]") if match else ""
 
 
@@ -283,8 +292,34 @@ def get_daily_task() -> dict[str, Any]:
         raise GoogleSheetsError("Daily_Progress is empty")
     headers = rows[0]
     cols = _column_map(headers)
+
+    # Canonical English Progress layout fallback:
+    # A Date | B Day of Week | C Murphy Topic | D Video Title |
+    # E Video URL | F Key Moments | G Duration | H Status |
+    # I New Cards Count | J Notes
+    canonical = {
+        "date": 0,
+        "grammar_topic": 2,
+        "video_title": 3,
+        "video_url": 4,
+        "recommended": 5,
+        "duration": 6,
+        "status": 7,
+        "new_cards": 8,
+        "notes": 9,
+    }
+    if len(headers) >= 10:
+        normalized_headers = [_normalize_header(x) for x in headers]
+        if normalized_headers[:10] == [
+            "date", "day of week", "murphy topic", "video title", "video url",
+            "key moments", "duration", "status", "new cards count", "notes",
+        ]:
+            cols.update(canonical)
+
     if "date" not in cols:
-        raise GoogleSheetsError("Daily_Progress: Date/Дата column not found")
+        raise GoogleSheetsError(
+            f"Daily_Progress: Date/Дата column not found. Headers: {headers}"
+        )
 
     today = datetime.now(ZoneInfo(settings.google_timezone)).date().isoformat()
     candidates: list[dict[str, Any]] = []
@@ -299,8 +334,10 @@ def get_daily_task() -> dict[str, Any]:
                 _cell(row, cols.get("notes")),
             ) if value
         )
-        video_url = _youtube_url(_cell(row, cols.get("video_url"))) or _youtube_url(combined)
+        raw_video_url = _cell(row, cols.get("video_url"))
+        video_url = _youtube_url(raw_video_url) or _youtube_url(combined)
         grammar = _cell(row, cols.get("grammar_topic"))
+        video_title = _cell(row, cols.get("video_title"))
         recommended_source = " | ".join(
             x for x in (_cell(row, cols.get("recommended")), _cell(row, cols.get("notes"))) if x
         )
@@ -310,6 +347,7 @@ def get_daily_task() -> dict[str, Any]:
                 "date": date_iso or _cell(row, cols.get("date")),
                 "status": status,
                 "video_url": video_url,
+                "video_title": video_title,
                 "grammar_topic": grammar,
                 "notes": _cell(row, cols.get("notes")),
                 "recommended_moments": parse_recommended_moments(recommended_source),
@@ -325,7 +363,12 @@ def get_daily_task() -> dict[str, Any]:
             raise GoogleSheetsError("No task for today and no active Daily_Progress row")
         task = active[-1]
     if not task["video_url"]:
-        raise GoogleSheetsError(f"Daily_Progress row {task['sheet_row']} has no YouTube URL")
+        row = rows[task["sheet_row"] - 1] if task["sheet_row"] - 1 < len(rows) else []
+        detected = _cell(row, cols.get("video_url"))
+        raise GoogleSheetsError(
+            f"Daily_Progress row {task['sheet_row']} has no YouTube URL. "
+            f"Detected Video URL cell: {detected!r}; headers: {headers}"
+        )
     return task
 
 
