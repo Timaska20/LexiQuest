@@ -710,6 +710,8 @@ function updateTranslationUI() {
 
 function frameLoop(_now, metadata) {
   const time = metadata.mediaTime;
+  trackPlayback(time);
+  handleRecommendedOnly(time);
   if (state.looping && state.currentPhraseIndex >= 0) {
     const p = state.phrases[state.currentPhraseIndex];
     if (p && time >= p.end_time) {
@@ -1334,7 +1336,7 @@ async function showLessonSummary() {
     : '<div class="subtle">В этом уроке ты пока не сохранил слов.</div>';
   const exportBtn = $('exportAnki');
   exportBtn.disabled = state.flashcards.length === 0;
-  exportBtn.textContent = state.flashcards.length ? `Экспортировать ${state.flashcards.length} в Anki` : 'Нет слов для Anki';
+  exportBtn.textContent = state.flashcards.length ? `Скачать .apkg (${state.flashcards.length})` : 'Нет слов для .apkg';
   $('lessonDialog').showModal();
 }
 
