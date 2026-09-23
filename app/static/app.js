@@ -1210,11 +1210,62 @@ $('dictWord').addEventListener('keydown', e => {
   if (e.key === 'Enter') lookupWord();
 });
 
+function decodeDictionaryEntities(value) {
+  const el = document.createElement('textarea');
+  el.innerHTML = String(value || '');
+  return el.value;
+}
+
+function stripDictionaryTags(value) {
+  return decodeDictionaryEntities(String(value || '').replace(/<[^>]+>/g, ' '))
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseDictionaryArticle(definition) {
+  const raw = String(definition || '');
+  const headword = stripDictionaryTags((raw.match(/<k>([\s\S]*?)<\/k>/i) || [,''])[1]);
+  const pronunciation = stripDictionaryTags((raw.match(/<tr>([\s\S]*?)<\/tr>/i) || [,''])[1]);
+  const partOfSpeech = stripDictionaryTags((raw.match(/<abr>([\s\S]*?)<\/abr>/i) || [,''])[1]);
+
+  const senseSource = raw
+    .replace(/<k>[\s\S]*?<\/k>/gi, ' ')
+    .replace(/<tr>[\s\S]*?<\/tr>/gi, ' ')
+    .replace(/<abr>[\s\S]*?<\/abr>/gi, ' ')
+    .replace(/<b>\s*(\d+)\s*(?:&gt;|>)\s*<\/b>/gi, '\n$1. ');
+  const plain = decodeDictionaryEntities(senseSource.replace(/<[^>]+>/g, ' '))
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\s*\n\s*/g, '\n')
+    .trim();
+
+  const senses = [];
+  const matches = [...plain.matchAll(/(?:^|\n)(\d+)\.\s*([\s\S]*?)(?=\n\d+\.\s*|$)/g)];
+  for (const match of matches) {
+    const text = match[2].replace(/\s+/g, ' ').trim();
+    if (text) senses.push({number:Number(match[1]), text});
+  }
+
+  let fallback = plain.replace(/^\d+\.\s*/, '').trim();
+  if (!senses.length && fallback) senses.push({number:1, text:fallback});
+  return {headword, pronunciation, partOfSpeech, senses};
+}
+
 function suggestedTranslation(definition) {
-  const clean = String(definition || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!clean) return '';
-  const first = clean.split(/\s*[;；|]\s*|\s{2,}/)[0].trim();
-  return first.slice(0, 240);
+  const article = parseDictionaryArticle(definition);
+  if (article.senses.length) return article.senses[0].text.slice(0, 240);
+  return '';
+}
+
+function dictionaryArticleHtml(definition) {
+  const article = parseDictionaryArticle(definition);
+  const meta = [article.pronunciation ? `[${escapeHtml(article.pronunciation.replace(/^[/\[]|[/\]]$/g, ''))}]` : '', article.partOfSpeech ? escapeHtml(article.partOfSpeech) : '']
+    .filter(Boolean).join(' · ');
+  const senses = article.senses.map(s => `<div class="dict-sense"><strong>${s.number}.</strong> ${escapeHtml(s.text)}</div>`).join('');
+  return `
+    ${article.headword ? `<div class="dict-headword">${escapeHtml(article.headword)}</div>` : ''}
+    ${meta ? `<div class="dict-pronunciation">${meta}</div>` : ''}
+    <div class="dict-senses">${senses || '<span class="subtle">Нет распознанного перевода</span>'}</div>
+  `;
 }
 
 async function lookupWord() {
@@ -1245,7 +1296,7 @@ async function lookupWord() {
       box.className = 'dict-entry';
       box.innerHTML = `
         <div class="dict-name">${escapeHtml(r.dictionary)}</div>
-        <div class="dict-definition">${escapeHtml(r.definition)}</div>
+        <div class="dict-definition">${dictionaryArticleHtml(r.definition)}</div>
         <label>Перевод для Anki</label>
         <input class="dict-target" value="${escapeHtml(suggestedTranslation(r.definition))}" />
         <div class="inline-actions">
@@ -1253,6 +1304,7 @@ async function lookupWord() {
           <button class="btn primary anki-word">В Anki</button>
         </div>
       `;
+      const article = parseDictionaryArticle(r.definition);
       box.querySelector('.save-word').addEventListener('click', async () => {
         const phraseId = state.dictionaryPhraseId;
         const target = box.querySelector('.dict-target').value.trim();
@@ -1262,7 +1314,7 @@ async function lookupWord() {
           await api(`/api/phrases/${phraseId}/flashcards`, {
             method:'POST',
             headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({source_word:word, target_word:target, dictionary_name:r.dictionary}),
+            body:JSON.stringify({source_word:word, target_word:target, dictionary_name:r.dictionary, pronunciation:article.pronunciation || null}),
           });
           await loadFlashcards();
           box.querySelector('.save-word').textContent = '✓ Сохранено';
@@ -1289,6 +1341,7 @@ async function lookupWord() {
             phrase_id:phraseId,
             source_word:word,
             target_word:target,
+            pronunciation:article.pronunciation || null,
             source_phrase:phrase.source_text || '',
             target_phrase:phrase.translated_text || '',
             clip_start:phrase.start_time,
