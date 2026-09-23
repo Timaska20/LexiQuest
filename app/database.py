@@ -48,6 +48,7 @@ def init_db() -> None:
             _ensure_column(conn, "flashcard", "clip_start", "FLOAT")
             _ensure_column(conn, "flashcard", "clip_end", "FLOAT")
             _ensure_column(conn, "flashcard", "exported_at", "TIMESTAMP")
+            _ensure_column(conn, "mined_cards", "pronunciation", "TEXT")
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_flashcard_source_word ON flashcard(source_word)"))
             # v0.9: normalize the common Kazakhstan country-code typo KZ to
             # the ISO 639-1 language code for Kazakh: KK. This repairs lessons
