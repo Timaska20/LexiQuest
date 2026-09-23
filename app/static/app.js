@@ -5,6 +5,7 @@ const state = {
   selectedVideo: null,
   phrases: [],
   flashcards: [],
+  ankiState: [],
   currentPhraseIndex: -1,
   looping: false,
   mode: 'watch',
@@ -344,6 +345,7 @@ function clearSelectedLesson() {
   state.selectedVideo = null;
   state.phrases = [];
   state.flashcards = [];
+  state.ankiState = [];
   state.currentPhraseIndex = -1;
   state.dictionaryPhraseId = null;
   state.looping = false;
@@ -513,7 +515,20 @@ async function loadPhrases() {
 async function loadFlashcards() {
   if (!state.selectedVideo) return;
   state.flashcards = await api(`/api/videos/${state.selectedVideo.id}/flashcards`);
+  state.ankiState = await api(`/api/anki/state?video_id=${encodeURIComponent(state.selectedVideo.id)}`);
   renderSavedWords();
+}
+
+function flashcardAnkiStatus(card) {
+  const word = String(card.source_word || '').toLocaleLowerCase();
+  return state.ankiState.find(x =>
+    x.phrase_id === card.phrase_id &&
+    String(x.source_word || '').toLocaleLowerCase() === word
+  )?.status || null;
+}
+
+function pendingFlashcardsForLesson() {
+  return state.flashcards.filter(card => flashcardAnkiStatus(card) !== 'synced');
 }
 
 function wordSegments(text, lang) {
@@ -1426,8 +1441,19 @@ async function showLessonSummary() {
   $('statLookups').textContent = state.stats.lookups;
   $('statLoops').textContent = state.stats.loops;
   $('summaryWords').innerHTML = state.flashcards.length
-    ? state.flashcards.map(c => `<span class="summary-chip">${escapeHtml(c.source_word)} → ${escapeHtml(c.target_word)}</span>`).join('')
+    ? state.flashcards.map(c => {
+        const synced = flashcardAnkiStatus(c) === 'synced';
+        return `<span class="summary-chip">${synced ? '✓ ' : ''}${escapeHtml(c.source_word)} → ${escapeHtml(c.target_word)}</span>`;
+      }).join('')
     : '<div class="subtle">В этом уроке ты пока не сохранил слов.</div>';
+
+  const pending = pendingFlashcardsForLesson();
+  const syncBtn = $('syncAnkiNow');
+  syncBtn.disabled = pending.length === 0;
+  syncBtn.textContent = pending.length
+    ? `Отправить ${pending.length} в AnkiConnect`
+    : '✓ Все сохранённые слова уже в Anki';
+
   const exportBtn = $('exportAnki');
   exportBtn.disabled = state.flashcards.length === 0;
   exportBtn.textContent = state.flashcards.length ? `Скачать .apkg (${state.flashcards.length})` : 'Нет слов для .apkg';
@@ -1439,26 +1465,69 @@ player.addEventListener('ended', () => {
   if (state.mode === 'watch') showLessonSummary();
 });
 $('syncAnkiNow')?.addEventListener('click', async () => {
-  if (!state.selectedVideo || !state.flashcards.length) return;
+  if (!state.selectedVideo) return;
+  await loadFlashcards();
+  const pendingCards = pendingFlashcardsForLesson();
+  if (!pendingCards.length) {
+    $('syncAnkiNow').disabled = true;
+    $('syncAnkiNow').textContent = '✓ Все сохранённые слова уже в Anki';
+    return;
+  }
+
+  const btn = $('syncAnkiNow');
+  btn.disabled = true;
+  btn.textContent = `Отправляю 0 / ${pendingCards.length}…`;
+
   let direct = 0;
   let queued = 0;
-  for (const card of state.flashcards) {
+  for (let i = 0; i < pendingCards.length; i++) {
+    const card = pendingCards[i];
     const phrase = phraseForId(card.phrase_id);
     if (!phrase) continue;
+
     const result = await pushOrQueueAnki({
-      video_id:state.selectedVideo.id, phrase_id:card.phrase_id,
-      source_word:card.source_word, target_word:card.target_word,
+      video_id:state.selectedVideo.id,
+      phrase_id:card.phrase_id,
+      source_word:card.source_word,
+      target_word:card.target_word,
+      pronunciation:card.pronunciation || null,
       source_phrase:card.source_phrase || phrase.source_text || '',
       target_phrase:card.target_phrase || phrase.translated_text || '',
-      clip_start:card.clip_start ?? phrase.start_time, clip_end:card.clip_end ?? phrase.end_time,
+      clip_start:card.clip_start ?? phrase.start_time,
+      clip_end:card.clip_end ?? phrase.end_time,
     });
+
     const key = String(card.source_word || '').toLocaleLowerCase();
-    const event = state.lookupEvents.get(key) || {word:card.source_word, context:card.source_phrase || phrase.source_text || '', frequency:1, mined:false};
+    const event = state.lookupEvents.get(key) || {
+      word:card.source_word,
+      context:card.source_phrase || phrase.source_text || '',
+      frequency:1,
+      mined:false,
+    };
     event.mined = true;
     state.lookupEvents.set(key, event);
+
     if (result.direct) direct++; else queued++;
+    btn.textContent = `Отправляю ${i + 1} / ${pendingCards.length}…`;
   }
-  $('syncAnkiNow').textContent = queued ? `✓ ${direct} в Anki · ${queued} в очереди` : `✓ ${direct} отправлено в Anki`;
+
+  await loadFlashcards();
+  const remaining = pendingFlashcardsForLesson();
+
+  if (!remaining.length) {
+    btn.disabled = true;
+    btn.textContent = `✓ ${direct} отправлено · очередь пуста`;
+  } else {
+    btn.disabled = false;
+    btn.textContent = `${remaining.length} ещё в очереди`;
+  }
+
+  $('summaryWords').innerHTML = state.flashcards.map(c => {
+    const synced = flashcardAnkiStatus(c) === 'synced';
+    return `<span class="summary-chip">${synced ? '✓ ' : ''}${escapeHtml(c.source_word)} → ${escapeHtml(c.target_word)}</span>`;
+  }).join('');
+
+  await refreshPendingAnki();
 });
 
 $('exportAnki').addEventListener('click', () => {
