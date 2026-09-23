@@ -73,6 +73,7 @@ function renderRecommendedMoments() {
   const timeline = $('recommendedTimeline');
   chips.innerHTML = '';
   timeline.innerHTML = '';
+  timeline.classList.toggle('hidden', !moments.length);
   if (!moments.length) return;
   const duration = Number(player.duration || state.selectedVideo?.duration || Math.max(...moments.map(x => x.end), 1));
   moments.forEach((r, i) => {
