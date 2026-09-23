@@ -139,10 +139,11 @@ def build_ankiconnect_note(card, audio_filename: str | None = None) -> dict:
         back_parts.append(f"[sound:{audio_filename}]")
     back = "<br>".join(back_parts)
     return {
-        "deckName": "Default",
+        "deckName": "LexiQuest",
         "modelName": ANKICONNECT_MODEL_NAME,
         "fields": {
             "Front": blank_word_in_context(card.source_phrase, card.source_word),
+            "Answer": card.source_word or "",
             "Back": back,
         },
         "options": {"allowDuplicate": False},
