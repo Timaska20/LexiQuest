@@ -53,6 +53,7 @@ class Flashcard(SQLModel, table=True):
     # dictionary translation/meaning selected by the learner.
     target_word: Optional[str] = None
     dictionary_name: Optional[str] = None
+    pronunciation: Optional[str] = None
     # Snapshot the exact learning context at save/sync time. An Anki card should
     # not silently change because subtitle rows are later re-segmented.
     source_phrase_snapshot: Optional[str] = None
@@ -109,6 +110,7 @@ class MinedCard(SQLModel, table=True):
     phrase_id: Optional[int] = Field(default=None, foreign_key="phrase.id", index=True)
     source_word: str = Field(index=True)
     target_word: str
+    pronunciation: Optional[str] = None
     source_phrase: str = ""
     target_phrase: str = ""
     clip_start: Optional[float] = None
