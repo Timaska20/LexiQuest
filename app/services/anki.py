@@ -9,7 +9,7 @@ import genanki
 
 from .media import extract_audio
 
-MODEL_ID = 1918042702
+MODEL_ID = 1918042703
 
 MODEL = genanki.Model(
     MODEL_ID,
@@ -17,6 +17,7 @@ MODEL = genanki.Model(
     fields=[
         {"name": "SourceWord"},
         {"name": "TargetWord"},
+        {"name": "Pronunciation"},
         {"name": "SourcePhrase"},
         {"name": "TargetPhrase"},
         {"name": "Audio"},
@@ -28,6 +29,7 @@ MODEL = genanki.Model(
             "name": "Word",
             "qfmt": """
 <div class="word source-word">{{SourceWord}}</div>
+<div class="pronunciation">{{Pronunciation}}</div>
 <div class="context source-context">{{SourcePhrase}}</div>
 <div class="audio">{{Audio}}</div>
 """,
@@ -43,6 +45,7 @@ MODEL = genanki.Model(
 .card { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; font-size: 20px; text-align: center; color: #111; background: #fff; padding: 12px; }
 .word { font-size: 34px; font-weight: 800; margin: 16px 0; }
 .target-word { color: #563fd8; }
+.pronunciation { color: #666; font-size: 18px; margin-top: -8px; }
 .context { font-size: 19px; line-height: 1.45; margin: 16px auto; max-width: 720px; }
 .target-context { color: #555; }
 .audio { margin-top: 14px; }
@@ -90,6 +93,7 @@ def build_selected_deck(video, cards, phrases_by_id: dict[int, object], video_pa
             fields=[
                 card.source_word,
                 card.target_word,
+                f"[{(card.pronunciation or '').strip('[]/')}]" if getattr(card, "pronunciation", None) else "",
                 source_phrase,
                 target_phrase,
                 f"[sound:{clip_name}]",
