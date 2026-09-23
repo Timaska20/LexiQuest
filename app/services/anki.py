@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import hashlib
 import re
 from pathlib import Path
@@ -121,9 +122,17 @@ def blank_word_in_context(source_phrase: str, source_word: str) -> str:
 
 
 def build_ankiconnect_note(card, audio_filename: str | None = None) -> dict:
-    back = card.target_word or ""
+    source_word = html.escape(card.source_word or "")
+    target_word = html.escape(card.target_word or "")
+    pronunciation = html.escape((getattr(card, "pronunciation", None) or "").strip())
+    back_parts = [f"<b>{source_word}</b>"]
+    if pronunciation:
+        back_parts.append(f"[{pronunciation.strip('[]/')}]")
+    if target_word:
+        back_parts.append(target_word)
     if audio_filename:
-        back = f"{back}<br>[sound:{audio_filename}]"
+        back_parts.append(f"[sound:{audio_filename}]")
+    back = "<br>".join(back_parts)
     return {
         "deckName": "Default",
         "modelName": "Basic (type in the answer)",
