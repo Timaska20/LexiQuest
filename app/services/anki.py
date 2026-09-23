@@ -104,3 +104,33 @@ def build_selected_deck(video, cards, phrases_by_id: dict[int, object], video_pa
     output_path.parent.mkdir(parents=True, exist_ok=True)
     package.write_to_file(str(output_path))
     return output_path
+
+
+
+def blank_word_in_context(source_phrase: str, source_word: str) -> str:
+    """Return a plain Front field for Basic (type in the answer).
+
+    The model's type-in behavior belongs in its card template; field values
+    should not contain nested {{type:...}} template syntax.
+    """
+    phrase = source_phrase or source_word
+    if not source_word:
+        return phrase
+    pattern = re.compile(re.escape(source_word), re.IGNORECASE)
+    return pattern.sub("[…]", phrase, count=1)
+
+
+def build_ankiconnect_note(card, audio_filename: str | None = None) -> dict:
+    back = card.target_word or ""
+    if audio_filename:
+        back = f"{back}<br>[sound:{audio_filename}]"
+    return {
+        "deckName": "Default",
+        "modelName": "Basic (type in the answer)",
+        "fields": {
+            "Front": blank_word_in_context(card.source_phrase, card.source_word),
+            "Back": back,
+        },
+        "options": {"allowDuplicate": False},
+        "tags": ["lexiquest"],
+    }
