@@ -10,6 +10,7 @@ import genanki
 from .media import extract_audio
 
 MODEL_ID = 1918042703
+ANKICONNECT_MODEL_NAME = "LexiQuest Type Answer"
 
 MODEL = genanki.Model(
     MODEL_ID,
@@ -139,7 +140,7 @@ def build_ankiconnect_note(card, audio_filename: str | None = None) -> dict:
     back = "<br>".join(back_parts)
     return {
         "deckName": "Default",
-        "modelName": "Basic (type in the answer)",
+        "modelName": ANKICONNECT_MODEL_NAME,
         "fields": {
             "Front": blank_word_in_context(card.source_phrase, card.source_word),
             "Back": back,
