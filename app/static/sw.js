@@ -1,8 +1,8 @@
-const CACHE = 'lexiquest-shell-v10';
+const CACHE = 'lexiquest-shell-v11';
 const SHELL = [
   '/',
-  '/assets/styles.css?v=0.10',
-  '/assets/app.js?v=0.10',
+  '/assets/styles.css?v=0.11',
+  '/assets/app.js?v=0.11',
   '/assets/icon.svg'
 ];
 
