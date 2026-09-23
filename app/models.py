@@ -88,6 +88,8 @@ class Dictionary(SQLModel, table=True):
 
 
 class StudySession(SQLModel, table=True):
+    __tablename__ = "study_sessions"
+
     id: Optional[int] = Field(default=None, primary_key=True)
     study_date: str = Field(index=True)
     video_id: Optional[str] = Field(default=None, foreign_key="video.id", index=True)
@@ -100,6 +102,8 @@ class StudySession(SQLModel, table=True):
 
 
 class MinedCard(SQLModel, table=True):
+    __tablename__ = "mined_cards"
+
     id: Optional[int] = Field(default=None, primary_key=True)
     video_id: Optional[str] = Field(default=None, foreign_key="video.id", index=True)
     phrase_id: Optional[int] = Field(default=None, foreign_key="phrase.id", index=True)
