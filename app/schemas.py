@@ -52,3 +52,35 @@ class FlashcardCreate(BaseModel):
     source_word: str = Field(min_length=1, max_length=200)
     target_word: str = Field(min_length=1, max_length=2000)
     dictionary_name: Optional[str] = Field(default=None, max_length=300)
+
+
+class PendingAnkiCreate(BaseModel):
+    video_id: Optional[str] = None
+    phrase_id: Optional[int] = None
+    source_word: str = Field(min_length=1, max_length=200)
+    target_word: str = Field(min_length=1, max_length=2000)
+    source_phrase: str = Field(default="", max_length=4000)
+    target_phrase: str = Field(default="", max_length=4000)
+    clip_start: Optional[float] = Field(default=None, ge=0)
+    clip_end: Optional[float] = Field(default=None, gt=0)
+
+
+class PendingAnkiSynced(BaseModel):
+    note_id: Optional[str] = Field(default=None, max_length=100)
+
+
+class LookupEvent(BaseModel):
+    word: str = Field(min_length=1, max_length=200)
+    context: str = Field(default="", max_length=4000)
+    frequency: int = Field(default=1, ge=1)
+    mined: bool = False
+
+
+class DailyComplete(BaseModel):
+    date: str = Field(min_length=10, max_length=10)
+    video_id: Optional[str] = None
+    time_spent_seconds: int = Field(default=0, ge=0)
+    completed_highlights: bool = False
+    looked_up_words: list[str] = Field(default_factory=list)
+    lookup_events: list[LookupEvent] = Field(default_factory=list)
+    mined_cards_count: int = Field(default=0, ge=0)
