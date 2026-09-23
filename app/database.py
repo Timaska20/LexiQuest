@@ -42,6 +42,7 @@ def init_db() -> None:
             _ensure_column(conn, "phrase", "provider", "TEXT DEFAULT 'source'")
             _ensure_column(conn, "flashcard", "source_word", "TEXT")
             _ensure_column(conn, "flashcard", "dictionary_name", "TEXT")
+            _ensure_column(conn, "flashcard", "pronunciation", "TEXT")
             _ensure_column(conn, "flashcard", "source_phrase_snapshot", "TEXT")
             _ensure_column(conn, "flashcard", "target_phrase_snapshot", "TEXT")
             _ensure_column(conn, "flashcard", "clip_start", "FLOAT")
