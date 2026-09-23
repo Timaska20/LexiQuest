@@ -176,7 +176,32 @@ function blankWord(sentence, word) {
   return i < 0 ? safe : safe.slice(0, i) + '[…]' + safe.slice(i + String(word).length);
 }
 
+async function ensureLexiQuestAnkiModel() {
+  const modelName = 'LexiQuest Type Answer';
+  const deckName = 'LexiQuest';
+
+  const decks = await ankiCall('deckNames');
+  if (!decks.includes(deckName)) {
+    await ankiCall('createDeck', {deck: deckName});
+  }
+
+  const models = await ankiCall('modelNames');
+  if (!models.includes(modelName)) {
+    await ankiCall('createModel', {
+      modelName,
+      inOrderFields:['Front','Answer','Back'],
+      css:'.card{font-family:Arial,sans-serif;font-size:20px;text-align:left;line-height:1.45}.answer{margin-top:14px}.pron{color:#777}',
+      cardTemplates:[{
+        Name:'LexiQuest',
+        Front:'{{Front}}<br><br>{{type:Answer}}',
+        Back:'{{FrontSide}}<hr id="answer">{{Back}}'
+      }]
+    });
+  }
+}
+
 async function directAnkiCard(card) {
+  await ensureLexiQuestAnkiModel();
   let sound = '';
   if (card.audio_url) {
     const res = await fetch(card.audio_url);
@@ -187,9 +212,9 @@ async function directAnkiCard(card) {
     }
   }
   const note = card.anki_note || {
-    deckName:'Default',
-    modelName:'Basic (type in the answer)',
-    fields:{Front:blankWord(card.source_phrase, card.source_word), Back:`<b>${escapeHtml(card.source_word || '')}</b>${card.pronunciation ? '<br>[' + escapeHtml(String(card.pronunciation).replace(/^[/\\[]|[/\\]]$/g, '')) + ']' : ''}<br>${escapeHtml(card.target_word || '')}${sound}`},
+    deckName:'LexiQuest',
+    modelName:'LexiQuest Type Answer',
+    fields:{Front:blankWord(card.source_phrase, card.source_word), Answer:card.source_word || '', Back:`<b>${escapeHtml(card.source_word || '')}</b>${card.pronunciation ? '<br>[' + escapeHtml(String(card.pronunciation).replace(/^[/\\[]|[/\\]]$/g, '')) + ']' : ''}<br>${escapeHtml(card.target_word || '')}${sound}`},
     options:{allowDuplicate:false},
     tags:['lexiquest'],
   };
@@ -216,9 +241,10 @@ async function pushOrQueueAnki(payload) {
       });
       state.minedCardsCount += 1;
       return {direct:true, noteId};
-    } catch (_) {
+    } catch (e) {
+      console.warn('AnkiConnect push failed', e);
       state.minedCardsCount += 1;
-      return {direct:false, queued:true};
+      return {direct:false, queued:true, error:e.message || String(e)};
     }
   } finally {
     refreshPendingAnki().catch(() => {});
