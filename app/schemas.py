@@ -52,6 +52,7 @@ class FlashcardCreate(BaseModel):
     source_word: str = Field(min_length=1, max_length=200)
     target_word: str = Field(min_length=1, max_length=2000)
     dictionary_name: Optional[str] = Field(default=None, max_length=300)
+    pronunciation: Optional[str] = Field(default=None, max_length=300)
 
 
 class PendingAnkiCreate(BaseModel):
@@ -59,6 +60,7 @@ class PendingAnkiCreate(BaseModel):
     phrase_id: Optional[int] = None
     source_word: str = Field(min_length=1, max_length=200)
     target_word: str = Field(min_length=1, max_length=2000)
+    pronunciation: Optional[str] = Field(default=None, max_length=300)
     source_phrase: str = Field(default="", max_length=4000)
     target_phrase: str = Field(default="", max_length=4000)
     clip_start: Optional[float] = Field(default=None, ge=0)
