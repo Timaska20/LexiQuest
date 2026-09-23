@@ -15,6 +15,14 @@ const state = {
   stats: {lookups: 0, phraseJumps: 0, loops: 0},
   seenPhraseIds: new Set(),
   swipeStart: null,
+  dailyTask: null,
+  recommendedMoments: [],
+  recommendedOnly: false,
+  watchedHighlightSeconds: new Map(),
+  watchedSeconds: new Set(),
+  lookupEvents: new Map(),
+  minedCardsCount: 0,
+  completionSent: false,
 };
 
 const player = $('player');
@@ -39,6 +47,241 @@ function fmtBytes(bytes) {
   if (!bytes) return '';
   const mb = bytes / 1024 / 1024;
   return `${mb.toFixed(mb > 100 ? 0 : 1)} MB`;
+}
+
+
+function fmtClock(sec) {
+  sec = Math.max(0, Math.floor(Number(sec || 0)));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const ss = sec % 60;
+  return h ? `${h}:${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}` : `${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+}
+
+function phraseOverlapsRecommended(p) {
+  return state.recommendedMoments.some(r => Math.min(Number(p.end_time), r.end) > Math.max(Number(p.start_time), r.start));
+}
+
+function renderRecommendedMoments() {
+  const root = $('recommendedMoments');
+  if (!root) return;
+  const moments = state.recommendedMoments || [];
+  root.classList.toggle('hidden', !moments.length);
+  const chips = $('recommendedChips');
+  const timeline = $('recommendedTimeline');
+  chips.innerHTML = '';
+  timeline.innerHTML = '';
+  if (!moments.length) return;
+  const duration = Number(player.duration || state.selectedVideo?.duration || Math.max(...moments.map(x => x.end), 1));
+  moments.forEach((r, i) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'recommended-chip';
+    chip.textContent = `▶ ${fmtClock(r.start)} - ${fmtClock(r.end)}: ${r.title || 'Момент ' + (i + 1)}`;
+    chip.addEventListener('click', () => {
+      player.currentTime = r.start;
+      player.play().catch(() => {});
+    });
+    chips.appendChild(chip);
+    const marker = document.createElement('span');
+    marker.className = 'recommended-range';
+    marker.style.left = `${Math.max(0, Math.min(100, r.start / duration * 100))}%`;
+    marker.style.width = `${Math.max(.6, Math.min(100, (r.end-r.start) / duration * 100))}%`;
+    timeline.appendChild(marker);
+  });
+}
+
+function applyDailyTaskToVideo() {
+  if (!state.selectedVideo || state.dailyTask?.video_id !== state.selectedVideo.id) {
+    state.recommendedMoments = [];
+  } else {
+    state.recommendedMoments = state.dailyTask.recommended_moments || [];
+  }
+  renderRecommendedMoments();
+  renderPhrases();
+}
+
+function trackPlayback(time) {
+  if (player.paused || player.seeking || !Number.isFinite(time)) return;
+  state.watchedSeconds.add(Math.floor(time));
+  state.recommendedMoments.forEach((r, idx) => {
+    if (time >= r.start && time < r.end) {
+      if (!state.watchedHighlightSeconds.has(idx)) state.watchedHighlightSeconds.set(idx, new Set());
+      state.watchedHighlightSeconds.get(idx).add(Math.floor(time));
+    }
+  });
+}
+
+function completedHighlights() {
+  if (!state.recommendedMoments.length) return true;
+  return state.recommendedMoments.every((r, idx) => {
+    const duration = Math.max(1, Math.ceil(r.end - r.start));
+    return (state.watchedHighlightSeconds.get(idx)?.size || 0) / duration >= .8;
+  });
+}
+
+function handleRecommendedOnly(time) {
+  if (!state.recommendedOnly || !state.recommendedMoments.length || player.seeking) return;
+  const moments = state.recommendedMoments;
+  const active = moments.findIndex(r => time >= r.start && time < r.end);
+  if (active >= 0) return;
+  const finished = moments.findIndex(r => time >= r.end && time < r.end + 1.2);
+  if (finished >= 0) {
+    const next = moments[finished + 1];
+    if (next) player.currentTime = next.start;
+    else player.pause();
+    return;
+  }
+  const next = moments.find(r => time < r.start);
+  if (next && time < moments[0].start) player.currentTime = next.start;
+}
+
+async function ankiCall(action, params = {}) {
+  const host = (localStorage.getItem('lexiquestAnkiHost') || 'http://localhost:8765').replace(/\/$/, '');
+  const response = await fetch(host, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({action, version:6, params}),
+  });
+  if (!response.ok) throw new Error(`AnkiConnect HTTP ${response.status}`);
+  const data = await response.json();
+  if (data.error) throw new Error(data.error);
+  return data.result;
+}
+
+async function blobToBase64(blob) {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function blankWord(sentence, word) {
+  const safe = String(sentence || word || '');
+  const i = safe.toLocaleLowerCase().indexOf(String(word || '').toLocaleLowerCase());
+  return i < 0 ? safe : safe.slice(0, i) + '[…]' + safe.slice(i + String(word).length);
+}
+
+async function directAnkiCard(card) {
+  let sound = '';
+  if (card.audio_url) {
+    const res = await fetch(card.audio_url);
+    if (res.ok) {
+      const filename = `lq_pending_${card.id || Date.now()}.mp3`;
+      await ankiCall('storeMediaFile', {filename, data: await blobToBase64(await res.blob())});
+      sound = `<br>[sound:${filename}]`;
+    }
+  }
+  const note = card.anki_note || {
+    deckName:'Default',
+    modelName:'Basic (type in the answer)',
+    fields:{Front:blankWord(card.source_phrase, card.source_word), Back:`${card.target_word || ''}${sound}`},
+    options:{allowDuplicate:false},
+    tags:['lexiquest'],
+  };
+  if (sound && note.fields?.Back && !note.fields.Back.includes('[sound:')) note.fields.Back += sound;
+  return await ankiCall('addNote', {note});
+}
+
+async function queueAnkiCard(payload) {
+  return await api('/api/anki/pending', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(payload),
+  });
+}
+
+async function pushOrQueueAnki(payload) {
+  try {
+    const pending = await queueAnkiCard(payload);
+    try {
+      const noteId = await directAnkiCard({...pending, audio_url:`/api/anki/pending/${pending.id}/audio`});
+      await api(`/api/anki/pending/${pending.id}/synced`, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({note_id:String(noteId)})
+      });
+      state.minedCardsCount += 1;
+      return {direct:true, noteId};
+    } catch (_) {
+      state.minedCardsCount += 1;
+      return {direct:false, queued:true};
+    }
+  } finally {
+    refreshPendingAnki().catch(() => {});
+  }
+}
+
+async function refreshPendingAnki() {
+  const pending = await api('/api/anki/pending');
+  if ($('ankiSyncPending')) $('ankiSyncPending').textContent = `Синхронизировать ${pending.length} отложенных`;
+  if ($('menuAnkiStatus')) $('menuAnkiStatus').textContent = pending.length ? `${pending.length} в очереди` : (localStorage.getItem('lexiquestAnkiHost') || 'localhost:8765');
+  return pending;
+}
+
+async function syncPendingAnki() {
+  const pending = await refreshPendingAnki();
+  let done = 0;
+  for (const card of pending) {
+    const noteId = await directAnkiCard(card);
+    await api(`/api/anki/pending/${card.id}/synced`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({note_id:String(noteId)})
+    });
+    done += 1;
+  }
+  await refreshPendingAnki();
+  return done;
+}
+
+async function loadDailyTask() {
+  const banner = $('dailyTaskBanner');
+  if (!banner) return;
+  try {
+    const status = await api('/api/auth/google/status');
+    if (!status.authorized) {
+      banner.classList.remove('hidden');
+      banner.textContent = 'Подключить Google Sheets';
+      banner.onclick = () => { location.href = '/api/auth/google/login'; };
+      return;
+    }
+    const task = await api('/api/daily/task');
+    state.dailyTask = task;
+    banner.classList.remove('hidden');
+    banner.textContent = `Задание дня${task.grammar_topic ? ' (' + task.grammar_topic + ')' : ''}`;
+    banner.onclick = async () => {
+      await loadVideos();
+      await selectVideo(task.video_id);
+    };
+    if (state.selectedVideo?.id === task.video_id) applyDailyTaskToVideo();
+  } catch (e) {
+    banner.classList.remove('hidden');
+    banner.textContent = 'Задание дня недоступно';
+    banner.title = e.message;
+  }
+}
+
+async function sendDailyCompletion() {
+  if (state.completionSent || !state.dailyTask || state.dailyTask.video_id !== state.selectedVideo?.id) return;
+  state.completionSent = true;
+  const events = [...state.lookupEvents.values()];
+  try {
+    await api('/api/daily/complete', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        date: state.dailyTask.date,
+        video_id: state.selectedVideo.id,
+        time_spent_seconds: state.watchedSeconds.size,
+        completed_highlights: completedHighlights(),
+        looked_up_words: events.map(x => x.word),
+        lookup_events: events,
+        mined_cards_count: state.minedCardsCount,
+      }),
+    });
+  } catch (e) {
+    state.completionSent = false;
+    console.warn('Daily completion failed', e);
+  }
 }
 
 function setVideoMeta(v) {
@@ -67,6 +310,11 @@ function clearSelectedLesson() {
   state.looping = false;
   state.mode = 'watch';
   state.seenPhraseIds = new Set();
+  state.watchedSeconds = new Set();
+  state.watchedHighlightSeconds = new Map();
+  state.lookupEvents = new Map();
+  state.minedCardsCount = 0;
+  state.completionSent = false;
   state.stats = {lookups: 0, phraseJumps: 0, loops: 0};
   clearOverlay();
   $('playerView').classList.add('hidden');
@@ -170,6 +418,7 @@ async function selectVideo(id) {
   updateLoopUI();
   updateModeUI();
   renderLibrary();
+  applyDailyTaskToVideo();
 
   $('emptyState').classList.add('hidden');
   $('playerView').classList.remove('hidden');
@@ -267,7 +516,7 @@ function renderPhrases() {
 
   state.phrases.forEach((p, i) => {
     const el = document.createElement('div');
-    el.className = `phrase-row ${i === state.currentPhraseIndex ? 'active' : ''}`;
+    el.className = `phrase-row ${i === state.currentPhraseIndex ? 'active' : ''} ${phraseOverlapsRecommended(p) ? 'cue-highlighted' : ''}`;
     el.dataset.phraseId = p.id;
     el.innerHTML = `
       <div class="phrase-time">${fmtTime(p.start_time)}</div>
@@ -485,6 +734,8 @@ if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
 } else {
   player.addEventListener('timeupdate', () => {
     const time = player.currentTime;
+    trackPlayback(time);
+    handleRecommendedOnly(time);
     if (state.looping && state.currentPhraseIndex >= 0) {
       const p = state.phrases[state.currentPhraseIndex];
       if (p && time >= p.end_time) {
@@ -955,6 +1206,12 @@ async function lookupWord() {
   if (!word) return;
   if (!state.dictionaryPhraseId && state.currentPhraseIndex >= 0) state.dictionaryPhraseId = state.phrases[state.currentPhraseIndex]?.id;
   state.stats.lookups += 1;
+  const lookupPhrase = phraseForId(state.dictionaryPhraseId) || (state.currentPhraseIndex >= 0 ? state.phrases[state.currentPhraseIndex] : null);
+  const lookupKey = word.toLocaleLowerCase();
+  const previousLookup = state.lookupEvents.get(lookupKey) || {word, context:lookupPhrase?.source_text || '', frequency:0, mined:false};
+  previousLookup.frequency += 1;
+  if (!previousLookup.context && lookupPhrase?.source_text) previousLookup.context = lookupPhrase.source_text;
+  state.lookupEvents.set(lookupKey, previousLookup);
   $('dictionaryTitle').textContent = word;
   $('dictResult').textContent = 'Ищу…';
 
@@ -974,7 +1231,10 @@ async function lookupWord() {
         <div class="dict-definition">${escapeHtml(r.definition)}</div>
         <label>Перевод для Anki</label>
         <input class="dict-target" value="${escapeHtml(suggestedTranslation(r.definition))}" />
-        <button class="btn primary full save-word">＋ Сохранить слово</button>
+        <div class="inline-actions">
+          <button class="btn ghost save-word">＋ Сохранить</button>
+          <button class="btn primary anki-word">В Anki</button>
+        </div>
       `;
       box.querySelector('.save-word').addEventListener('click', async () => {
         const phraseId = state.dictionaryPhraseId;
@@ -990,6 +1250,42 @@ async function lookupWord() {
           await loadFlashcards();
           box.querySelector('.save-word').textContent = '✓ Сохранено';
         } catch (e) {
+          alert(e.message);
+        }
+      });
+      box.querySelector('.anki-word').addEventListener('click', async () => {
+        const phraseId = state.dictionaryPhraseId;
+        const phrase = phraseForId(phraseId);
+        const target = box.querySelector('.dict-target').value.trim();
+        if (!phraseId || !phrase) return alert('Слово должно быть связано с конкретной фразой.');
+        if (!target) return alert('Укажи перевод слова.');
+        const btn = box.querySelector('.anki-word');
+        btn.disabled = true;
+        btn.textContent = 'Отправляю…';
+        try {
+          await api(`/api/phrases/${phraseId}/flashcards`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({source_word:word, target_word:target, dictionary_name:r.dictionary}),
+          });
+          const result = await pushOrQueueAnki({
+            video_id:state.selectedVideo.id,
+            phrase_id:phraseId,
+            source_word:word,
+            target_word:target,
+            source_phrase:phrase.source_text || '',
+            target_phrase:phrase.translated_text || '',
+            clip_start:phrase.start_time,
+            clip_end:phrase.end_time,
+          });
+          const key = word.toLocaleLowerCase();
+          const event = state.lookupEvents.get(key) || {word, context:phrase.source_text || '', frequency:1, mined:false};
+          event.mined = true;
+          state.lookupEvents.set(key, event);
+          await loadFlashcards();
+          btn.textContent = result.direct ? '✓ В Anki' : '✓ В очереди';
+        } catch (e) {
+          btn.disabled = false;
+          btn.textContent = 'В Anki';
           alert(e.message);
         }
       });
@@ -1027,6 +1323,7 @@ function renderSavedWords() {
 async function showLessonSummary() {
   if (!state.selectedVideo) return;
   await loadFlashcards();
+  sendDailyCompletion().catch(() => {});
   $('summaryTitle').textContent = state.selectedVideo.title;
   $('statWords').textContent = state.flashcards.length;
   $('statPhrases').textContent = `${state.seenPhraseIds.size} / ${state.phrases.length}`;
@@ -1045,21 +1342,68 @@ $('finishLessonDesktop').addEventListener('click', showLessonSummary);
 player.addEventListener('ended', () => {
   if (state.mode === 'watch') showLessonSummary();
 });
+$('syncAnkiNow')?.addEventListener('click', async () => {
+  if (!state.selectedVideo || !state.flashcards.length) return;
+  let direct = 0;
+  let queued = 0;
+  for (const card of state.flashcards) {
+    const phrase = phraseForId(card.phrase_id);
+    if (!phrase) continue;
+    const result = await pushOrQueueAnki({
+      video_id:state.selectedVideo.id, phrase_id:card.phrase_id,
+      source_word:card.source_word, target_word:card.target_word,
+      source_phrase:card.source_phrase || phrase.source_text || '',
+      target_phrase:card.target_phrase || phrase.translated_text || '',
+      clip_start:card.clip_start ?? phrase.start_time, clip_end:card.clip_end ?? phrase.end_time,
+    });
+    if (result.direct) direct++; else queued++;
+  }
+  $('syncAnkiNow').textContent = queued ? `✓ ${direct} в Anki · ${queued} в очереди` : `✓ ${direct} отправлено в Anki`;
+});
+
 $('exportAnki').addEventListener('click', () => {
   if (!state.selectedVideo || !state.flashcards.length) return;
   window.location.href = `/api/videos/${state.selectedVideo.id}/anki`;
 });
 
 // Close sheet dialogs when tapping the dark backdrop.
-for (const id of ['menuDialog','subtitleDialog','libraryDialog','transcriptDialog','dictionaryDialog','savedDialog','dictionaryManagerDialog','deleteLessonDialog']) {
+for (const id of ['menuDialog','subtitleDialog','libraryDialog','transcriptDialog','dictionaryDialog','savedDialog','dictionaryManagerDialog','deleteLessonDialog','ankiDialog']) {
   const d = $(id);
   d?.addEventListener('click', ev => {
     if (ev.target === d) d.close();
   });
 }
 
+$('recommendedOnly')?.addEventListener('change', e => {
+  state.recommendedOnly = e.target.checked;
+  if (state.recommendedOnly && state.recommendedMoments.length) {
+    const current = player.currentTime || 0;
+    if (!state.recommendedMoments.some(r => current >= r.start && current < r.end)) player.currentTime = state.recommendedMoments[0].start;
+  }
+});
+player.addEventListener('loadedmetadata', renderRecommendedMoments);
+$('menuAnki')?.addEventListener('click', () => {
+  closeDialog('menuDialog');
+  $('ankiHost').value = localStorage.getItem('lexiquestAnkiHost') || 'http://localhost:8765';
+  $('ankiDialog').showModal();
+  refreshPendingAnki().catch(() => {});
+});
+$('ankiDialogClose')?.addEventListener('click', () => closeDialog('ankiDialog'));
+$('ankiHost')?.addEventListener('change', e => localStorage.setItem('lexiquestAnkiHost', e.target.value.trim() || 'http://localhost:8765'));
+$('ankiTest')?.addEventListener('click', async () => {
+  localStorage.setItem('lexiquestAnkiHost', $('ankiHost').value.trim() || 'http://localhost:8765');
+  try { const version = await ankiCall('version'); $('ankiStatus').textContent = `AnkiConnect доступен · API ${version}`; }
+  catch (e) { $('ankiStatus').textContent = `Недоступен: ${e.message}`; }
+});
+$('ankiSyncPending')?.addEventListener('click', async () => {
+  localStorage.setItem('lexiquestAnkiHost', $('ankiHost').value.trim() || 'http://localhost:8765');
+  try { const n = await syncPendingAnki(); $('ankiStatus').textContent = `Синхронизировано: ${n}`; }
+  catch (e) { $('ankiStatus').textContent = `Ошибка: ${e.message}`; }
+});
+
 updateSpeedUI();
 updateLoopUI();
 updateTranslationUI();
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/assets/sw.js?v=0.10').catch(() => {});
-loadVideos();
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/assets/sw.js?v=0.11').catch(() => {});
+loadVideos().then(() => loadDailyTask()).catch(() => {});
+refreshPendingAnki().catch(() => {});
