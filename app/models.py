@@ -85,3 +85,32 @@ class Dictionary(SQLModel, table=True):
     base_path: str
     enabled: bool = True
     created_at: datetime = Field(default_factory=utcnow)
+
+
+class StudySession(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    study_date: str = Field(index=True)
+    video_id: Optional[str] = Field(default=None, foreign_key="video.id", index=True)
+    time_spent_seconds: int = 0
+    completed_highlights: bool = False
+    looked_up_words_json: str = "[]"
+    lookup_events_json: str = "[]"
+    mined_cards_count: int = 0
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class MinedCard(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    video_id: Optional[str] = Field(default=None, foreign_key="video.id", index=True)
+    phrase_id: Optional[int] = Field(default=None, foreign_key="phrase.id", index=True)
+    source_word: str = Field(index=True)
+    target_word: str
+    source_phrase: str = ""
+    target_phrase: str = ""
+    clip_start: Optional[float] = None
+    clip_end: Optional[float] = None
+    audio_path: Optional[str] = None
+    status: str = Field(default="pending_anki", index=True)
+    anki_note_id: Optional[str] = None
+    created_at: datetime = Field(default_factory=utcnow)
+    synced_at: Optional[datetime] = None
