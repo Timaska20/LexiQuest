@@ -8,18 +8,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select
 
 from .auth import BasicAuthMiddleware
 from .config import settings
 from .database import engine, get_session, init_db
-from .models import Dictionary, Flashcard, Job, Phrase, Video
+from .models import Dictionary, Flashcard, Job, MinedCard, Phrase, StudySession, Video
 from .languages import normalize_lang
-from .schemas import FlashcardCreate, PhraseCreate, PhraseUpdate, VideoURLCreate, VOTSubtitleRequest
-from .services.anki import build_selected_deck
+from .schemas import DailyComplete, FlashcardCreate, PendingAnkiCreate, PendingAnkiSynced, PhraseCreate, PhraseUpdate, VideoURLCreate, VOTSubtitleRequest
+from .services.anki import build_ankiconnect_note, build_selected_deck
 from .services.dictionary_upload import DictionaryUploadError, install_uploaded_dictionary
+from .services.google_sheets import GoogleSheetsError, append_weak_spots, auth_status, build_login_url, complete_daily_task, exchange_code, get_daily_task
+from .services.media import extract_audio
 from .services.stardict import StarDictDictionary, StarDictError, get_stardict
 from .services.vot import vot_status
 
@@ -55,6 +57,158 @@ def health():
     return {"ok": True, "service": "lexiquest-cake", "version": "0.10.0"}
 
 
+
+
+
+@app.get("/api/auth/google/login")
+def google_login():
+    try:
+        return RedirectResponse(build_login_url(), status_code=302)
+    except GoogleSheetsError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@app.get("/api/auth/google/callback")
+def google_callback(code: str = "", state: str = "", error: str = ""):
+    if error:
+        raise HTTPException(400, f"Google OAuth: {error}")
+    if not code:
+        raise HTTPException(400, "Missing OAuth code")
+    try:
+        exchange_code(code, state)
+    except GoogleSheetsError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return RedirectResponse("/?google=connected", status_code=302)
+
+
+@app.get("/api/auth/google/status")
+def google_status():
+    return auth_status()
+
+
+@app.get("/api/daily/task")
+def daily_task(session: Session = Depends(get_session)):
+    try:
+        task = get_daily_task()
+    except GoogleSheetsError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+    video = session.exec(select(Video).where(Video.source_url == task["video_url"]).order_by(Video.created_at.desc())).first()
+    if not video:
+        video = Video(
+            id=new_video_id(),
+            source_url=task["video_url"],
+            source_provider="url",
+            title=task.get("grammar_topic") or "Daily lesson",
+            source_lang="en",
+            target_lang="ru",
+            status="queued",
+        )
+        session.add(video)
+        session.commit()
+        session.refresh(video)
+        session.add(
+            Job(
+                video_id=video.id,
+                payload_json=json.dumps({"kind": "url", "url": task["video_url"], "title": None}),
+            )
+        )
+        session.commit()
+    task["video"] = serialize_video(video, session)
+    task["video_id"] = video.id
+    return task
+
+
+@app.get("/api/anki/pending")
+def pending_anki(session: Session = Depends(get_session)):
+    cards = session.exec(
+        select(MinedCard).where(MinedCard.status == "pending_anki").order_by(MinedCard.created_at)
+    ).all()
+    return [
+        {
+            **card.model_dump(),
+            "anki_note": build_ankiconnect_note(card, f"lq_pending_{card.id}.mp3" if card.clip_start is not None and card.clip_end is not None else None),
+            "audio_url": f"/api/anki/pending/{card.id}/audio" if card.clip_start is not None and card.clip_end is not None and card.video_id else None,
+        }
+        for card in cards
+    ]
+
+
+@app.post("/api/anki/pending")
+def create_pending_anki(body: PendingAnkiCreate, session: Session = Depends(get_session)):
+    card = MinedCard(**body.model_dump(), status="pending_anki")
+    session.add(card)
+    session.commit()
+    session.refresh(card)
+    return {
+        **card.model_dump(),
+        "anki_note": build_ankiconnect_note(card, f"lq_pending_{card.id}.mp3" if card.clip_start is not None and card.clip_end is not None else None),
+    }
+
+
+@app.get("/api/anki/pending/{card_id}/audio")
+def pending_anki_audio(card_id: int, session: Session = Depends(get_session)):
+    card = session.get(MinedCard, card_id)
+    if not card or not card.video_id or card.clip_start is None or card.clip_end is None:
+        raise HTTPException(404, "Audio clip is unavailable")
+    video = session.get(Video, card.video_id)
+    if not video or not video.file_path:
+        raise HTTPException(404, "Video is unavailable")
+    output = settings.media_root / "audio" / f"lq_pending_{card.id}.mp3"
+    if not output.exists():
+        extract_audio(Path(video.file_path), float(card.clip_start), float(card.clip_end), output)
+    return FileResponse(output, media_type="audio/mpeg", filename=output.name)
+
+
+@app.post("/api/anki/pending/{card_id}/synced")
+def mark_pending_anki_synced(card_id: int, body: PendingAnkiSynced, session: Session = Depends(get_session)):
+    card = session.get(MinedCard, card_id)
+    if not card:
+        raise HTTPException(404, "Pending card not found")
+    card.status = "synced"
+    card.anki_note_id = body.note_id
+    card.synced_at = now()
+    session.add(card)
+    session.commit()
+    return {"ok": True}
+
+
+@app.post("/api/daily/complete")
+def complete_daily(body: DailyComplete, session: Session = Depends(get_session)):
+    lookup_events = [event.model_dump() for event in body.lookup_events]
+    study = StudySession(
+        study_date=body.date,
+        video_id=body.video_id,
+        time_spent_seconds=body.time_spent_seconds,
+        completed_highlights=body.completed_highlights,
+        looked_up_words_json=json.dumps(body.looked_up_words, ensure_ascii=False),
+        lookup_events_json=json.dumps(lookup_events, ensure_ascii=False),
+        mined_cards_count=body.mined_cards_count,
+    )
+    session.add(study)
+    session.commit()
+    session.refresh(study)
+
+    sheets_result = None
+    weak_spots = 0
+    try:
+        sheets_result = complete_daily_task(body.date, body.mined_cards_count, body.time_spent_seconds)
+        weak_spots = append_weak_spots(body.date, lookup_events)
+    except GoogleSheetsError as exc:
+        return {
+            "ok": True,
+            "session_id": study.id,
+            "google_updated": False,
+            "google_error": str(exc),
+            "weak_spots_appended": 0,
+        }
+    return {
+        "ok": True,
+        "session_id": study.id,
+        "google_updated": True,
+        "progress": sheets_result,
+        "weak_spots_appended": weak_spots,
+    }
 
 
 @app.get("/api/vot/status")
