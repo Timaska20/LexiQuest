@@ -215,7 +215,11 @@ async function directAnkiCard(card) {
   const note = card.anki_note || {
     deckName:'LexiQuest',
     modelName:'LexiQuest Type Answer',
-    fields:{Front:blankWord(card.source_phrase, card.source_word), Answer:card.source_word || '', Back:`<b>${escapeHtml(card.source_word || '')}</b>${card.pronunciation ? '<br>[' + escapeHtml(String(card.pronunciation).replace(/^[/\\[]|[/\\]]$/g, '')) + ']' : ''}<br>${escapeHtml(card.target_word || '')}${sound}`},
+    fields:{
+      Front:blankWord(card.source_phrase, card.source_word),
+      Answer:card.source_word || '',
+      Back:`<b>${escapeHtml(card.source_word || '')}</b>${card.pronunciation ? '<br>[' + escapeHtml(String(card.pronunciation).replace(/^[/\\[]|[/\\]]$/g, '')) + ']' : ''}<br>${escapeHtml(card.target_word || '')}${card.target_phrase ? '<hr><div><small>Перевод фразы</small><br>' + escapeHtml(card.target_phrase) + '</div>' : ''}${sound}`
+    },
     options:{allowDuplicate:false},
     tags:['lexiquest'],
   };
@@ -1291,10 +1295,50 @@ function parseDictionaryArticle(definition) {
   return {headword, pronunciation, partOfSpeech, senses};
 }
 
-function suggestedTranslation(definition) {
+function translationTokens(value) {
+  return String(value || '')
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .split(/\s+/)
+    .filter(x => x.length >= 3);
+}
+
+function chooseSenseIndex(article, phraseTranslation = '') {
+  if (!article.senses.length) return -1;
+  const context = String(phraseTranslation || '').toLocaleLowerCase();
+  if (!context) return 0;
+
+  const contextTokens = new Set(translationTokens(context));
+  let bestIndex = 0;
+  let bestScore = -1;
+
+  article.senses.forEach((sense, index) => {
+    const text = String(sense.text || '').toLocaleLowerCase();
+    let score = 0;
+
+    // Exact multi-word fragments from the sense are strong evidence.
+    for (const fragment of text.split(/[;,]/).map(x => x.trim()).filter(Boolean)) {
+      if (fragment.length >= 4 && context.includes(fragment)) score += 8;
+    }
+
+    // Token overlap with the translated subtitle is a weaker fallback.
+    for (const token of translationTokens(text)) {
+      if (contextTokens.has(token)) score += 2;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = index;
+    }
+  });
+
+  return bestIndex;
+}
+
+function suggestedTranslation(definition, phraseTranslation = '') {
   const article = parseDictionaryArticle(definition);
-  if (article.senses.length) return article.senses[0].text.slice(0, 240);
-  return '';
+  const index = chooseSenseIndex(article, phraseTranslation);
+  return index >= 0 ? article.senses[index].text.slice(0, 240) : '';
 }
 
 function dictionaryArticleHtml(definition) {
@@ -1339,13 +1383,34 @@ async function lookupWord() {
         <div class="dict-name">${escapeHtml(r.dictionary)}</div>
         <div class="dict-definition">${dictionaryArticleHtml(r.definition)}</div>
         <label>Перевод для Anki</label>
-        <input class="dict-target" value="${escapeHtml(suggestedTranslation(r.definition))}" />
+        <div class="dict-sense-picker"></div>
+        <input class="dict-target" value="${escapeHtml(suggestedTranslation(r.definition, lookupPhrase?.translated_text || ''))}" />
         <div class="inline-actions">
           <button class="btn ghost save-word">＋ Сохранить</button>
           <button class="btn primary anki-word">В Anki</button>
         </div>
       `;
       const article = parseDictionaryArticle(r.definition);
+      const picker = box.querySelector('.dict-sense-picker');
+      const targetInput = box.querySelector('.dict-target');
+      const autoIndex = chooseSenseIndex(article, lookupPhrase?.translated_text || '');
+      if (article.senses.length > 1) {
+        article.senses.forEach((sense, index) => {
+          const choice = document.createElement('button');
+          choice.type = 'button';
+          choice.className = `dict-sense-choice ${index === autoIndex ? 'active' : ''}`;
+          choice.textContent = `${sense.number}. ${sense.text}`;
+          choice.addEventListener('click', () => {
+            targetInput.value = sense.text.slice(0, 240);
+            picker.querySelectorAll('.dict-sense-choice').forEach(x => x.classList.remove('active'));
+            choice.classList.add('active');
+          });
+          picker.appendChild(choice);
+        });
+      } else {
+        picker.classList.add('hidden');
+      }
+
       box.querySelector('.save-word').addEventListener('click', async () => {
         const phraseId = state.dictionaryPhraseId;
         const target = box.querySelector('.dict-target').value.trim();
