@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#090b12" />
+  <title>LexiQuest Cake</title>
+  <link rel="manifest" href="/assets/manifest.webmanifest" />
+  <link rel="icon" href="/assets/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/assets/styles.css?v=0.10" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <button id="mobileLibraryOpen" class="mobile-only icon-btn" aria-label="Библиотека">☰</button>
+      <div class="brand-wrap">
+        <div class="brand"><span class="brand-dot"></span>LexiQuest <strong>Cake</strong></div>
+        <div class="subtle desktop-only">self-hosted language player</div>
+      </div>
+      <button id="addOpen" class="btn primary top-add">＋ Видео</button>
+    </header>
+
+    <main class="layout">
+      <aside class="library card desktop-library">
+        <div class="section-title-row">
+          <h2>Библиотека</h2>
+          <button id="refreshBtn" class="icon-btn" title="Обновить">↻</button>
+        </div>
+        <div id="libraryList" class="library-list"></div>
+      </aside>
+
+      <section class="workspace">
+        <div id="emptyState" class="card empty-state">
+          <div class="cake">▰</div>
+          <h1>Твоя языковая медиатека</h1>
+          <p>Добавь ссылку или видеофайл. После обработки ролик останется на твоём VPS.</p>
+          <button class="btn primary" id="emptyAdd">Добавить первое видео</button>
+        </div>
+
+        <div id="playerView" class="hidden">
+          <section class="player-stage card">
+            <div class="player-head desktop-only">
+              <div>
+                <h1 id="videoTitle">Video</h1>
+                <div id="videoMeta" class="subtle"></div>
+              </div>
+              <button id="finishLessonDesktop" class="btn ghost">Завершить · <span class="saved-count">0</span></button>
+            </div>
+
+            <div class="video-wrap">
+              <video id="player" playsinline preload="metadata" controls></video>
+
+              <div class="video-floating-top">
+                <button id="menuOpen" class="round-control" aria-label="Меню">⋮</button>
+              </div>
+
+              <div id="phraseOverlay" class="phrase-overlay hidden">
+                <div id="overlaySource" class="overlay-source"></div>
+                <div id="overlayTranslation" class="overlay-translation"></div>
+              </div>
+
+              <div class="video-floating-bottom mobile-only">
+                <button id="modeWatchMobile" class="mode-pill active">Смотреть</button>
+                <button id="modeStudyMobile" class="mode-pill">Учить</button>
+                <button id="savedBadge" class="saved-badge" aria-label="Сохранённые слова">♡ <span class="saved-count">0</span></button>
+              </div>
+            </div>
+
+            <div class="desktop-modebar desktop-only">
+              <div class="segmented">
+                <button id="modeWatchDesktop" class="segment active">Смотреть</button>
+                <button id="modeStudyDesktop" class="segment">Учить</button>
+              </div>
+              <div class="subtle">Нажми слово в субтитрах — сразу откроется режим изучения.</div>
+            </div>
+          </section>
+
+          <section id="studyPane" class="study-pane hidden">
+            <div class="study-card card" id="studyCard">
+              <div class="study-tools">
+                <button id="studySpeed" class="tool-pill">1×</button>
+                <button id="studyReplay" class="tool-pill" title="Повторить фразу">↶</button>
+                <button id="studyLoop" class="tool-pill">Loop OFF</button>
+                <div class="study-spacer"></div>
+                <button id="studyEdit" class="tool-pill" title="Редактировать фразу">✎</button>
+              </div>
+
+              <button id="studyPrev" class="edge-nav left" aria-label="Предыдущая фраза">‹</button>
+              <button id="studyNext" class="edge-nav right" aria-label="Следующая фраза">›</button>
+
+              <div id="studySource" class="study-source"></div>
+              <div id="studyTranslation" class="study-translation"></div>
+
+              <div class="study-footer">
+                <span id="studyCounter" class="study-counter">0/0</span>
+                <span class="swipe-hint">свайп ← →</span>
+                <button id="studySaveSentence" class="circle-plus" title="Пока не используется">＋</button>
+              </div>
+            </div>
+
+            <div class="study-note">Нажми слово для словаря. В режиме «Учить» видео остановится в конце текущей фразы.</div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="menuDialog" class="sheet-dialog">
+    <form method="dialog" class="sheet-card">
+      <div class="sheet-handle"></div>
+      <div class="section-title-row">
+        <div>
+          <div class="subtle">Настройки урока</div>
+          <h2 id="menuVideoTitle">Видео</h2>
+        </div>
+        <button value="cancel" class="icon-btn">✕</button>
+      </div>
+
+      <div class="menu-section">
+        <div class="menu-label">Режим</div>
+        <div class="segmented wide">
+          <button type="button" id="menuWatch" class="segment active">Смотреть</button>
+          <button type="button" id="menuStudy" class="segment">Учить</button>
+        </div>
+      </div>
+
+      <div class="menu-grid">
+        <button type="button" id="menuSpeed" class="menu-tile"><strong>1×</strong><span>Скорость</span></button>
+        <button type="button" id="menuLoop" class="menu-tile"><strong>OFF</strong><span>Loop</span></button>
+        <button type="button" id="menuTranslation" class="menu-tile"><strong>ON</strong><span>Перевод</span></button>
+        <button type="button" id="menuTranscript" class="menu-tile"><strong>☷</strong><span>Транскрипт</span></button>
+      </div>
+
+      <div class="menu-list">
+        <button type="button" id="menuEditPhrase" class="menu-row"><span>✎</span><div><strong>Редактировать текущую фразу</strong><small>таймкод, оригинал, перевод</small></div></button>
+        <button type="button" id="menuAddPhrase" class="menu-row"><span>＋</span><div><strong>Добавить фразу</strong><small>с текущего времени</small></div></button>
+        <button type="button" id="menuLibrary" class="menu-row mobile-only"><span>▦</span><div><strong>Библиотека</strong><small>выбрать другое видео</small></div></button>
+        <button type="button" id="menuSaved" class="menu-row"><span>♡</span><div><strong>Слова урока</strong><small><span class="saved-count">0</span> сохранено</small></div></button>
+        <button type="button" id="menuVot" class="menu-row"><span>V</span><div><strong>Субтитры VOT</strong><small id="menuVotStatus">перегенерировать · язык речи / auto</small></div></button>
+        <button type="button" id="menuDictionaries" class="menu-row"><span>⌕</span><div><strong>Словари</strong><small>загрузить StarDict с телефона или ПК</small></div></button>
+        <button type="button" id="menuAddVideo" class="menu-row"><span>＋</span><div><strong>Добавить видео</strong><small>URL или файл</small></div></button>
+        <button type="button" id="menuFinish" class="menu-row accent-row"><span>✓</span><div><strong>Завершить урок</strong><small>статистика и экспорт Anki</small></div></button>
+        <button type="button" id="menuDeleteLesson" class="menu-row danger-row"><span>⌫</span><div><strong>Удалить урок</strong><small>видео, субтитры и сохранённые слова</small></div></button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="subtitleDialog" class="sheet-dialog">
+    <div class="sheet-card subtitle-settings-card">
+      <div class="sheet-handle"></div>
+      <div class="section-title-row">
+        <div>
+          <div class="subtle">VOT / Yandex</div>
+          <h2>Перегенерировать субтитры</h2>
+        </div>
+        <button id="subtitleDialogClose" class="icon-btn" type="button">✕</button>
+      </div>
+
+      <div class="subtitle-warning">
+        Старые фразы заменятся только после успешного ответа VOT. Если языковая пара не меняется, сохранённые слова перепривязываются по таймкоду. Если Source или Target изменится — старые сохранённые слова очищаются, чтобы не получить неправильные Anki-карточки.
+      </div>
+
+      <label>Язык речи (Source)</label>
+      <input id="subtitleSourceLang" value="auto" maxlength="16" list="sourceLanguageCodes" placeholder="auto / en / kk / es …" />
+      <div class="subtle"><strong>auto</strong> — VOT сам определяет язык речи. Если определение ошиблось, выбери язык вручную и перегенерируй ещё раз.</div>
+
+      <label>Язык перевода (Target)</label>
+      <input id="subtitleTargetLang" value="ru" maxlength="16" list="languageCodes" placeholder="ru / en / kk" />
+      <div class="subtle">Для VOT сейчас самые надёжные Target: <strong>ru</strong>, <strong>en</strong>, <strong>kk</strong>.</div>
+
+      <div class="subtitle-current" id="subtitleCurrentLangs"></div>
+      <button id="subtitleRegenerate" type="button" class="btn primary full">↻ Перегенерировать субтитры</button>
+      <div id="subtitleRegenerateStatus" class="subtle"></div>
+    </div>
+  </dialog>
+
+  <dialog id="libraryDialog" class="sheet-dialog tall-sheet">
+    <form method="dialog" class="sheet-card">
+      <div class="sheet-handle"></div>
+      <div class="section-title-row">
+        <h2>Библиотека</h2>
+        <button value="cancel" class="icon-btn">✕</button>
+      </div>
+      <div id="mobileLibraryList" class="library-list mobile-library-list"></div>
+      <button id="mobileAddVideo" type="button" class="btn primary full">＋ Добавить видео</button>
+    </form>
+  </dialog>
+
+  <dialog id="transcriptDialog" class="sheet-dialog tall-sheet">
+    <form method="dialog" class="sheet-card">
+      <div class="sheet-handle"></div>
+      <div class="section-title-row">
+        <div>
+          <h2>Транскрипт</h2>
+          <div class="subtle">Служебный режим — не занимает экран во время урока.</div>
+        </div>
+        <button value="cancel" class="icon-btn">✕</button>
+      </div>
+      <div id="phraseList" class="phrase-list"></div>
+    </form>
+  </dialog>
+
+  <dialog id="dictionaryDialog" class="sheet-dialog dictionary-sheet tall-sheet">
+    <div class="sheet-card">
+      <div class="sheet-handle"></div>
+      <div class="section-title-row">
+        <div>
+          <div class="subtle">Словарь</div>
+          <h2 id="dictionaryTitle">Слово</h2>
+        </div>
+        <button id="dictClose" class="icon-btn">✕</button>
+      </div>
+
+      <div class="dictionary-context">
+        <div id="dictionaryPhraseSource" class="dictionary-context-source"></div>
+        <div id="dictionaryPhraseTarget" class="dictionary-context-target"></div>
+      </div>
+
+      <div class="dictionary-search">
+        <input id="dictWord" placeholder="Слово" autocomplete="off" />
+        <button id="dictLookup" class="btn primary">Найти</button>
+      </div>
+
+      <div id="dictResult" class="dict-result muted-box">Нажми слово в субтитрах или в карточке.</div>
+    </div>
+  </dialog>
+
+  <dialog id="savedDialog" class="sheet-dialog tall-sheet">
+    <div class="sheet-card">
+      <div class="sheet-handle"></div>
+      <div class="section-title-row">
+        <div>
+          <h2>Слова урока</h2>
+          <div class="subtle">Только они попадут в Anki.</div>
+        </div>
+        <button id="savedClose" class="icon-btn">✕</button>
+      </div>
+      <div id="savedWords" class="saved-words"></div>
+    </div>
+  </dialog>
+
+  <dialog id="dictionaryManagerDialog" class="sheet-dialog tall-sheet">
+    <div class="sheet-card">
+      <div class="sheet-handle"></div>
+      <div class="section-title-row">
+        <div>
+          <h2>Словари</h2>
+          <div class="subtle">StarDict хранится локально на сервере.</div>
+        </div>
+        <button id="dictionaryManagerClose" class="icon-btn">✕</button>
+      </div>
+
+      <div class="dictionary-upload-card">
+        <div class="dict-lang-row">
+          <label>Из <input id="dictSourceLang" value="en" maxlength="16" list="languageCodes" /></label>
+          <span>→</span>
+          <label>В <input id="dictTargetLang" value="ru" maxlength="16" list="languageCodes" /></label>
+        </div>
+        <label class="file-drop">
+          <strong>Выбрать словарь</strong>
+          <span>ZIP или .ifo + .idx + .dict/.dict.dz</span>
+          <input id="dictionaryFiles" type="file" multiple accept=".zip,.ifo,.idx,.dict,.dz,.syn" />
+        </label>
+        <button id="dictionaryUpload" class="btn primary full">Загрузить на сервер</button>
+        <div id="dictionaryUploadStatus" class="subtle"></div>
+      </div>
+
+      <div class="section-title-row compact">
+        <h3>Установленные</h3>
+        <button id="dictionaryRescan" class="btn ghost small">Сканировать папку</button>
+      </div>
+      <div id="dictionaryManagerList" class="dictionary-manager-list"></div>
+      <div class="subtle dictionary-help">Для словаря Мюллера нужен StarDict-пакет. Сам словарь приложение не скачивает и не распространяет — пользователь загружает свой файл.</div>
+    </div>
+  </dialog>
+
+  <dialog id="addDialog" class="dialog">
+    <form method="dialog" class="dialog-card" id="addForm">
+      <div class="section-title-row">
+        <div>
+          <h2>Добавить видео</h2>
+          <div class="subtle">Ссылка или локальный файл</div>
+        </div>
+        <button value="cancel" class="icon-btn">✕</button>
+      </div>
+
+      <label>Источник</label>
+      <div class="tab-row">
+        <button type="button" id="tabUrl" class="tab active">URL</button>
+        <button type="button" id="tabFile" class="tab">Файл</button>
+      </div>
+      <div id="urlPanel"><input id="videoUrl" type="url" placeholder="https://…" /></div>
+      <div id="filePanel" class="hidden"><input id="videoFile" type="file" accept="video/*,.mkv,.webm,.mov,.m4v" /></div>
+
+      <label>Название <span class="subtle">(необязательно)</span></label>
+      <input id="videoTitleInput" placeholder="My lesson" />
+
+      <div class="two-cols">
+        <div><label>Язык видео</label><input id="sourceLang" value="en" list="languageCodes" placeholder="en / kk / es" /></div>
+        <div><label>Язык перевода</label><input id="targetLang" value="ru" list="languageCodes" placeholder="ru / en / kk" /></div>
+      </div>
+      <div class="subtle">Қазақша = <strong>kk</strong>. Если ввести <strong>kz</strong>, Cake сам исправит на kk.</div>
+
+      <button id="submitAdd" type="button" class="btn primary full">Запустить обработку</button>
+      <div id="addStatus" class="subtle"></div>
+    </form>
+  </dialog>
+
+  <dialog id="phraseDialog" class="dialog">
+    <form method="dialog" class="dialog-card" id="phraseForm">
+      <div class="section-title-row">
+        <h2>Фраза</h2>
+        <button value="cancel" class="icon-btn">✕</button>
+      </div>
+      <div class="two-cols">
+        <div><label>Начало</label><input id="phraseStart" type="number" step="0.01" min="0" /></div>
+        <div><label>Конец</label><input id="phraseEnd" type="number" step="0.01" min="0" /></div>
+      </div>
+      <div class="inline-actions">
+        <button id="useNowStart" type="button" class="btn ghost small">Start = сейчас</button>
+        <button id="useNowEnd" type="button" class="btn ghost small">End = сейчас</button>
+      </div>
+      <label>Оригинал</label>
+      <textarea id="phraseSource" rows="3"></textarea>
+      <label>Перевод</label>
+      <textarea id="phraseTranslation" rows="3"></textarea>
+      <input id="phraseEditId" type="hidden" />
+      <button id="savePhrase" type="button" class="btn primary full">Сохранить</button>
+    </form>
+  </dialog>
+
+
+  <dialog id="deleteLessonDialog" class="dialog">
+    <div class="dialog-card delete-lesson-card">
+      <div class="section-title-row">
+        <div>
+          <div class="subtle">Удаление урока</div>
+          <h2 id="deleteLessonTitle">Видео</h2>
+        </div>
+        <button id="deleteLessonClose" class="icon-btn" type="button">✕</button>
+      </div>
+      <div class="delete-warning">
+        <strong>Удалить этот урок с сервера?</strong>
+        <p>Будут удалены локальное видео, субтитры, слова этого урока, аудиоклипы и созданный для него Anki-файл. Словари останутся.</p>
+      </div>
+      <div id="deleteLessonMeta" class="subtle delete-meta"></div>
+      <div class="delete-actions">
+        <button id="deleteLessonCancel" type="button" class="btn ghost">Отмена</button>
+        <button id="deleteLessonConfirm" type="button" class="btn danger">Удалить урок</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="lessonDialog" class="dialog">
+    <form method="dialog" class="dialog-card lesson-summary">
+      <div class="section-title-row">
+        <div>
+          <div class="subtle">Урок завершён</div>
+          <h2 id="summaryTitle">Видео</h2>
+        </div>
+        <button value="cancel" class="icon-btn">✕</button>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-box"><strong id="statWords">0</strong><span>слов сохранено</span></div>
+        <div class="stat-box"><strong id="statPhrases">0</strong><span>фраз просмотрено</span></div>
+        <div class="stat-box"><strong id="statLookups">0</strong><span>поисков в словаре</span></div>
+        <div class="stat-box"><strong id="statLoops">0</strong><span>повторов loop</span></div>
+      </div>
+      <div id="summaryWords" class="summary-words"></div>
+      <button id="exportAnki" type="button" class="btn primary full">Экспортировать в Anki</button>
+      <div class="subtle summary-note">В Anki попадут только сохранённые слова: слово + перевод словаря, фраза + её перевод и локальный аудиоклип.</div>
+    </form>
+  </dialog>
+
+  <script src="/assets/app.js?v=0.10" defer></script>
+  <datalist id="sourceLanguageCodes">
+    <option value="auto">Автоопределение VOT</option>
+    <option value="en">English</option>
+    <option value="kk">Қазақша</option>
+    <option value="ru">Русский</option>
+    <option value="es">Español</option>
+    <option value="de">Deutsch</option>
+    <option value="fr">Français</option>
+    <option value="tr">Türkçe</option>
+    <option value="zh">中文</option>
+    <option value="ja">日本語</option>
+    <option value="ko">한국어</option>
+  </datalist>
+  <datalist id="languageCodes">
+    <option value="en">English</option>
+    <option value="kk">Қазақша</option>
+    <option value="ru">Русский</option>
+    <option value="es">Español</option>
+    <option value="de">Deutsch</option>
+    <option value="fr">Français</option>
+    <option value="tr">Türkçe</option>
+    <option value="zh">中文</option>
+    <option value="ja">日本語</option>
+    <option value="ko">한국어</option>
+  </datalist>
+</body>
+</html>

@@ -1,0 +1,38 @@
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "127.0.0.1:${LEXIQUEST_PORT:-8088}:8000"
+    volumes:
+      - ./data:/app/data
+      - ./media:/app/media
+      - ./dictionaries:/app/dictionaries
+      - ./exports:/app/exports
+
+  worker:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    command: python -m app.worker
+    volumes:
+      - ./data:/app/data
+      - ./media:/app/media
+      - ./dictionaries:/app/dictionaries
+      - ./exports:/app/exports
+
+  vot:
+    build:
+      context: ./vot-bridge
+      args:
+        VOT_JS_VERSION: ${VOT_JS_VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      PORT: 3100
+      VOT_POLL_TIMEOUT_MS: ${VOT_POLL_TIMEOUT_MS:-180000}
+      VOT_POLL_INTERVAL_MS: ${VOT_POLL_INTERVAL_MS:-5000}
+      VOT_WORKER_HOST: ${VOT_WORKER_HOST:-vot-new.toil-dump.workers.dev}
+    expose:
+      - "3100"

@@ -1,0 +1,7 @@
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+sqlmodel==0.0.42
+python-multipart>=0.0.20,<1
+pydantic-settings>=2.10,<3
+yt-dlp
+genanki>=0.13.1,<1
