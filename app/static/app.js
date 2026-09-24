@@ -210,13 +210,30 @@ async function directAnkiCard(card) {
       sound = `<br>[sound:${filename}]`;
     }
   }
+  const cloze = blankWord(card.source_phrase, card.source_word);
+  const phraseTranslation = escapeHtml(card.target_phrase || '');
+  const fullSource = escapeHtml(card.source_phrase || '');
+  const front = `
+    <div class="lq-cloze">${cloze}</div>
+    ${phraseTranslation ? `<div class="lq-hint" style="margin-top:12px;color:#666">${phraseTranslation}</div>` : ''}
+    <div class="lq-prompt" style="margin-top:14px"><small>Введите пропущенное слово:</small></div>
+  `;
+  const back = `
+    ${fullSource ? `<div class="lq-sentence">${fullSource}</div>` : ''}
+    ${phraseTranslation ? `<div class="lq-translation" style="margin-top:8px;color:#666">${phraseTranslation}</div>` : ''}
+    <hr>
+    <b>${escapeHtml(card.source_word || '')}</b>
+    ${card.pronunciation ? '<br>[' + escapeHtml(String(card.pronunciation).replace(/^[/\\[]|[/\\]]$/g, '')) + ']' : ''}
+    ${card.target_word ? '<br>' + escapeHtml(card.target_word) : ''}
+    ${sound}
+  `;
   const note = card.anki_note || {
     deckName:'LexiQuest',
     modelName:'LexiQuest Type Answer',
     fields:{
-      Front:blankWord(card.source_phrase, card.source_word),
+      Front:front,
       Answer:card.source_word || '',
-      Back:`<b>${escapeHtml(card.source_word || '')}</b>${card.pronunciation ? '<br>[' + escapeHtml(String(card.pronunciation).replace(/^[/\\[]|[/\\]]$/g, '')) + ']' : ''}<br>${escapeHtml(card.target_word || '')}${card.target_phrase ? '<hr><div><small>Перевод фразы</small><br>' + escapeHtml(card.target_phrase) + '</div>' : ''}${sound}`
+      Back:back
     },
     options:{allowDuplicate:false},
     tags:['lexiquest'],
