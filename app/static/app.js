@@ -63,7 +63,10 @@ function fmtClock(sec) {
 }
 
 function phraseOverlapsRecommended(p) {
-  return state.recommendedMoments.some(r => Math.min(Number(p.end_time), r.end) > Math.max(Number(p.start_time), r.start));
+  const start = Number(p.start_time || 0);
+  const end = Number(p.end_time || start);
+  const midpoint = (start + end) / 2;
+  return state.recommendedMoments.some(r => midpoint >= r.start && midpoint < r.end);
 }
 
 function renderRecommendedMoments() {
@@ -75,9 +78,8 @@ function renderRecommendedMoments() {
   const timeline = $('recommendedTimeline');
   chips.innerHTML = '';
   timeline.innerHTML = '';
-  timeline.classList.toggle('hidden', !moments.length);
+  timeline.classList.add('hidden');
   if (!moments.length) return;
-  const duration = Number(player.duration || state.selectedVideo?.duration || Math.max(...moments.map(x => x.end), 1));
   moments.forEach((r, i) => {
     const chip = document.createElement('button');
     chip.type = 'button';
@@ -88,11 +90,6 @@ function renderRecommendedMoments() {
       player.play().catch(() => {});
     });
     chips.appendChild(chip);
-    const marker = document.createElement('span');
-    marker.className = 'recommended-range';
-    marker.style.left = `${Math.max(0, Math.min(100, r.start / duration * 100))}%`;
-    marker.style.width = `${Math.max(.6, Math.min(100, (r.end-r.start) / duration * 100))}%`;
-    timeline.appendChild(marker);
   });
 }
 
@@ -1423,10 +1420,16 @@ async function lookupWord() {
       box.className = 'dict-entry';
       box.innerHTML = `
         <div class="dict-name">${escapeHtml(r.dictionary)}</div>
-        <div class="dict-definition">${dictionaryArticleHtml(r.definition)}</div>
-        <label>Перевод для Anki</label>
+        <div class="dict-compact-meta"></div>
         <div class="dict-sense-picker"></div>
-        <input class="dict-target" value="${escapeHtml(suggestedTranslation(r.definition, lookupPhrase?.translated_text || ''))}" />
+        <div class="dict-custom-row hidden">
+          <input class="dict-target" value="${escapeHtml(suggestedTranslation(r.definition, lookupPhrase?.translated_text || ''))}" />
+        </div>
+        <button class="dict-custom-toggle" type="button">✎ Свой перевод</button>
+        <details class="dict-full">
+          <summary>Показать словарь</summary>
+          <div class="dict-definition">${dictionaryArticleHtml(r.definition)}</div>
+        </details>
         <div class="inline-actions">
           <button class="btn ghost save-word">＋ Сохранить</button>
           <button class="btn primary anki-word">В Anki</button>
@@ -1435,23 +1438,42 @@ async function lookupWord() {
       const article = parseDictionaryArticle(r.definition);
       const picker = box.querySelector('.dict-sense-picker');
       const targetInput = box.querySelector('.dict-target');
+      const customRow = box.querySelector('.dict-custom-row');
+      const customToggle = box.querySelector('.dict-custom-toggle');
+      const meta = box.querySelector('.dict-compact-meta');
       const autoIndex = chooseSenseIndex(article, lookupPhrase?.translated_text || '');
-      if (article.senses.length > 1) {
-        article.senses.forEach((sense, index) => {
-          const choice = document.createElement('button');
-          choice.type = 'button';
-          choice.className = `dict-sense-choice ${index === autoIndex ? 'active' : ''}`;
-          choice.textContent = `${sense.number}. ${sense.text}`;
-          choice.addEventListener('click', () => {
-            targetInput.value = sense.text.slice(0, 240);
-            picker.querySelectorAll('.dict-sense-choice').forEach(x => x.classList.remove('active'));
-            choice.classList.add('active');
-          });
-          picker.appendChild(choice);
+
+      meta.textContent = [
+        article.pronunciation ? `[${String(article.pronunciation).replace(/^[/\\[]|[/\\]]$/g, '')}]` : '',
+        article.partOfSpeech || ''
+      ].filter(Boolean).join(' · ');
+
+      const senses = article.senses.length ? article.senses : [{number:1, text:targetInput.value || word}];
+      let selectedIndex = Math.max(0, autoIndex);
+
+      senses.forEach((sense, index) => {
+        const choice = document.createElement('button');
+        choice.type = 'button';
+        choice.className = `dict-sense-choice ${index === selectedIndex ? 'active' : ''}`;
+        choice.textContent = `${sense.number}. ${sense.text}`;
+        choice.addEventListener('click', () => {
+          selectedIndex = index;
+          targetInput.value = sense.text.slice(0, 240);
+          customRow.classList.add('hidden');
+          customToggle.textContent = '✎ Свой перевод';
+          picker.querySelectorAll('.dict-sense-choice').forEach(x => x.classList.remove('active'));
+          choice.classList.add('active');
         });
-      } else {
-        picker.classList.add('hidden');
-      }
+        picker.appendChild(choice);
+      });
+
+      if (senses[selectedIndex]) targetInput.value = senses[selectedIndex].text.slice(0, 240);
+
+      customToggle.addEventListener('click', () => {
+        const hidden = customRow.classList.toggle('hidden');
+        customToggle.textContent = hidden ? '✎ Свой перевод' : 'Скрыть свой перевод';
+        if (!hidden) targetInput.focus();
+      });
 
       box.querySelector('.save-word').addEventListener('click', async () => {
         const phraseId = state.dictionaryPhraseId;
