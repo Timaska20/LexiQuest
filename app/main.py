@@ -20,7 +20,7 @@ from .languages import normalize_lang
 from .schemas import DailyComplete, FlashcardCreate, PendingAnkiCreate, PendingAnkiSynced, PhraseCreate, PhraseUpdate, VideoURLCreate, VOTSubtitleRequest
 from .services.anki import build_ankiconnect_note, build_selected_deck
 from .services.dictionary_upload import DictionaryUploadError, install_uploaded_dictionary
-from .services.google_sheets import GoogleSheetsError, append_weak_spots, auth_status, build_login_url, complete_daily_task, exchange_code, get_daily_task
+from .services.google_sheets import GoogleSheetsError, append_weak_spots, auth_status, build_login_url, complete_daily_task, exchange_code, get_daily_task, get_daily_tasks
 from .services.media import extract_audio
 from .services.stardict import StarDictDictionary, StarDictError, get_stardict
 from .services.vot import vot_status
@@ -86,20 +86,16 @@ def google_status():
     return auth_status()
 
 
-@app.get("/api/daily/task")
-def daily_task(session: Session = Depends(get_session)):
-    try:
-        task = get_daily_task()
-    except GoogleSheetsError as exc:
-        raise HTTPException(503, str(exc)) from exc
-
-    video = session.exec(select(Video).where(Video.source_url == task["video_url"]).order_by(Video.created_at.desc())).first()
+def _ensure_daily_video(task: dict, session: Session) -> dict:
+    video = session.exec(
+        select(Video).where(Video.source_url == task["video_url"]).order_by(Video.created_at.desc())
+    ).first()
     if not video:
         video = Video(
             id=new_video_id(),
             source_url=task["video_url"],
             source_provider="url",
-            title=task.get("grammar_topic") or "Daily lesson",
+            title=task.get("video_title") or task.get("grammar_topic") or "Daily lesson",
             source_lang="en",
             target_lang="ru",
             status="queued",
@@ -110,13 +106,34 @@ def daily_task(session: Session = Depends(get_session)):
         session.add(
             Job(
                 video_id=video.id,
-                payload_json=json.dumps({"kind": "url", "url": task["video_url"], "title": None}),
+                payload_json=json.dumps({"kind": "url", "url": task["video_url"], "title": task.get("video_title")}),
             )
         )
         session.commit()
+    task = dict(task)
     task["video"] = serialize_video(video, session)
     task["video_id"] = video.id
     return task
+
+
+@app.get("/api/daily/tasks")
+def daily_tasks(session: Session = Depends(get_session)):
+    try:
+        bundle = get_daily_tasks()
+    except GoogleSheetsError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    bundle = dict(bundle)
+    bundle["tasks"] = [_ensure_daily_video(task, session) for task in bundle["tasks"]]
+    return bundle
+
+
+@app.get("/api/daily/task")
+def daily_task(session: Session = Depends(get_session)):
+    try:
+        task = get_daily_task()
+    except GoogleSheetsError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return _ensure_daily_video(task, session)
 
 
 @app.get("/api/anki/state")
@@ -241,7 +258,7 @@ def complete_daily(body: DailyComplete, session: Session = Depends(get_session))
     sheets_result = None
     weak_spots = 0
     try:
-        sheets_result = complete_daily_task(body.date, body.mined_cards_count, body.time_spent_seconds)
+        sheets_result = complete_daily_task(body.date, body.mined_cards_count, body.time_spent_seconds, body.sheet_row)
         weak_spots = append_weak_spots(body.date, lookup_events)
     except GoogleSheetsError as exc:
         return {
