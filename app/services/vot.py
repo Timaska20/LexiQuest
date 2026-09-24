@@ -370,7 +370,7 @@ def _dp_refine_translation_alignment(source: list[dict], target: list[dict]) -> 
 
     n = len(source)
     m = len(units)
-    max_take = 4
+    max_take = 6
     neg_inf = -10**12
 
     # dp[i][j] = best score after assigning first j target units to first i source cues.
@@ -403,9 +403,12 @@ def _dp_refine_translation_alignment(source: list[dict], target: list[dict]) -> 
                     dp[i + 1][j + take] = candidate
                     back[i + 1][j + take] = (j, take)
 
-    # Prefer consuming all units; if impossible, choose the furthest consumed
-    # state with a small penalty for leftovers.
-    best_j = max(range(m + 1), key=lambda j: dp[n][j] - (m - j) * 4.0)
+    # Prefer consuming every translated unit. Only fall back to a partial path
+    # when the local max_take bound made a full path impossible.
+    if dp[n][m] > neg_inf / 2:
+        best_j = m
+    else:
+        best_j = max(range(m + 1), key=lambda j: dp[n][j] - (m - j) * 6.0)
     assignments: list[list[dict]] = [[] for _ in range(n)]
     i, j = n, best_j
     while i > 0:
