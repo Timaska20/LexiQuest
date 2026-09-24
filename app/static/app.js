@@ -362,6 +362,7 @@ async function sendDailyCompletion() {
         mined_cards_count: state.minedCardsCount,
       }),
     });
+    await loadDailyTask();
   } catch (e) {
     state.completionSent = false;
     console.warn('Daily completion failed', e);
