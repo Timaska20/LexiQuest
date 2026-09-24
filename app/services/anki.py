@@ -127,27 +127,41 @@ def blank_word_in_context(source_phrase: str, source_word: str) -> str:
 
 
 def build_ankiconnect_note(card, audio_filename: str | None = None) -> dict:
-    source_word = html.escape(card.source_word or "")
+    source_word_raw = card.source_word or ""
+    source_word = html.escape(source_word_raw)
+    source_phrase_raw = (getattr(card, "source_phrase", None) or "").strip()
+    target_phrase_raw = (getattr(card, "target_phrase", None) or "").strip()
+    source_phrase = html.escape(source_phrase_raw)
+    target_phrase = html.escape(target_phrase_raw)
     target_word = html.escape(card.target_word or "")
     pronunciation = html.escape((getattr(card, "pronunciation", None) or "").strip())
-    back_parts = [f"<b>{source_word}</b>"]
+
+    front_parts = [f"<div class='lq-cloze'>{blank_word_in_context(source_phrase_raw, source_word_raw)}</div>"]
+    if target_phrase:
+        front_parts.append(f"<div class='lq-hint'>{target_phrase}</div>")
+    front_parts.append("<div class='lq-prompt'><small>Введите пропущенное слово:</small></div>")
+
+    back_parts = []
+    if source_phrase:
+        back_parts.append(f"<div class='lq-sentence'>{source_phrase}</div>")
+    if target_phrase:
+        back_parts.append(f"<div class='lq-translation'>{target_phrase}</div>")
+    back_parts.append("<hr>")
+    back_parts.append(f"<b>{source_word}</b>")
     if pronunciation:
         back_parts.append(f"[{pronunciation.strip('[]/')}]")
     if target_word:
         back_parts.append(target_word)
-    target_phrase = html.escape((getattr(card, "target_phrase", None) or "").strip())
-    if target_phrase:
-        back_parts.append(f"<hr><div><small>Перевод фразы</small><br>{target_phrase}</div>")
     if audio_filename:
         back_parts.append(f"[sound:{audio_filename}]")
-    back = "<br>".join(back_parts)
+
     return {
         "deckName": "LexiQuest",
         "modelName": ANKICONNECT_MODEL_NAME,
         "fields": {
-            "Front": blank_word_in_context(card.source_phrase, card.source_word),
-            "Answer": card.source_word or "",
-            "Back": back,
+            "Front": "<br>".join(front_parts),
+            "Answer": source_word_raw,
+            "Back": "<br>".join(back_parts),
         },
         "options": {"allowDuplicate": False},
         "tags": ["lexiquest"],
