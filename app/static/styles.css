@@ -150,3 +150,12 @@ h2{font-size:18px;margin-bottom:4px}.subtle{color:var(--muted);font-size:13px;li
 .dict-pronunciation{color:var(--muted);font-size:.95rem;margin-bottom:10px}
 .dict-senses{display:grid;gap:6px;line-height:1.45}
 .dict-sense strong{color:#b9c5e6;margin-right:4px}
+
+.daily-tasks-list{display:grid;gap:10px;margin-top:14px}
+.daily-task-item{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:12px;border:1px solid rgba(255,255,255,.10);border-radius:14px;background:rgba(255,255,255,.035)}
+.daily-task-item.done{opacity:.62}
+.daily-task-main{min-width:0}
+.daily-task-type{font-size:.78rem;font-weight:800;color:#8ee8cf;text-transform:uppercase;letter-spacing:.04em}
+.daily-task-title{font-weight:800;margin-top:3px}
+.daily-task-meta{font-size:.85rem;color:var(--muted);margin-top:4px}
+.daily-task-open{white-space:nowrap}
