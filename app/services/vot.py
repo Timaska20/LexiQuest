@@ -322,6 +322,39 @@ def build_synced_phrase_pairs(source_cues: list[dict], target_cues: list[dict]) 
             "source_text": str(s["text"]).strip(),
             "translated_text": " ".join(compact).strip(),
         })
+    # Repair a common VOT segmentation artifact where the target track cuts a
+    # sentence at a different point than the source track. Example:
+    #   source 1: "Well, he's at camp all week."
+    #   target 1: "Он в лагере на всю неделю. Жаль,"
+    #   source 2: "I'm sorry you won't get to meet him."
+    #   target 2: "что ты не сможешь с ним познакомиться."
+    #
+    # Timing alone assigns "Жаль," to the previous cue. If a completed sentence
+    # is followed by a short dangling comma/colon fragment, move only that
+    # fragment to the next translation. This is deliberately conservative.
+    for i in range(len(pairs) - 1):
+        current = str(pairs[i].get("translated_text") or "").strip()
+        following = str(pairs[i + 1].get("translated_text") or "").strip()
+        if not current or not following:
+            continue
+
+        match = re.match(
+            r"^(?P<main>.+[.!?…])\s+(?P<tail>[^.!?…]{1,48}[,:;])$",
+            current,
+            flags=re.UNICODE,
+        )
+        if not match:
+            continue
+
+        tail = match.group("tail").strip()
+        # Avoid moving long clauses; this is for short discourse fragments like
+        # "Жаль,", "Но,", "Вообще-то," that were split at the wrong cue boundary.
+        if len(re.findall(r"\w+", tail, flags=re.UNICODE)) > 5:
+            continue
+
+        pairs[i]["translated_text"] = match.group("main").strip()
+        pairs[i + 1]["translated_text"] = f"{tail} {following}".strip()
+
     return pairs
 
 
