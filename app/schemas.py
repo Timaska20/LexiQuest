@@ -81,6 +81,7 @@ class LookupEvent(BaseModel):
 class DailyComplete(BaseModel):
     date: str = Field(min_length=10, max_length=10)
     video_id: Optional[str] = None
+    sheet_row: Optional[int] = Field(default=None, ge=2)
     time_spent_seconds: int = Field(default=0, ge=0)
     completed_highlights: bool = False
     looked_up_words: list[str] = Field(default_factory=list)
