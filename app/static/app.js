@@ -17,6 +17,7 @@ const state = {
   seenPhraseIds: new Set(),
   swipeStart: null,
   dailyTask: null,
+  dailyBundle: null,
   recommendedMoments: [],
   recommendedOnly: false,
   watchedHighlightSeconds: new Map(),
@@ -277,6 +278,37 @@ async function syncPendingAnki() {
   return done;
 }
 
+function renderDailyBundle() {
+  const bundle = state.dailyBundle;
+  const list = $('dailyTasksList');
+  if (!bundle || !list) return;
+
+  $('dailyTasksTitle').textContent = `Задание дня${bundle.grammar_topic ? ' · ' + bundle.grammar_topic : ''}`;
+  $('dailyTasksProgress').textContent = `${bundle.completed} из ${bundle.total} просмотрено`;
+  list.innerHTML = '';
+
+  bundle.tasks.forEach(task => {
+    const done = ['посмотрел','watched','done','completed'].includes(String(task.status || '').trim().toLocaleLowerCase());
+    const row = document.createElement('div');
+    row.className = `daily-task-item ${done ? 'done' : ''}`;
+    row.innerHTML = `
+      <div class="daily-task-main">
+        <div class="daily-task-type">${escapeHtml(task.video_type || 'Видео')}${done ? ' · ✓' : ''}</div>
+        <div class="daily-task-title">${escapeHtml(task.video_title || task.video?.title || 'Видео')}</div>
+        <div class="daily-task-meta">${escapeHtml(task.notes || '')}</div>
+      </div>
+      <button class="btn ${done ? 'ghost' : 'primary'} daily-task-open" type="button">${done ? 'Открыть' : 'Смотреть'}</button>
+    `;
+    row.querySelector('.daily-task-open').addEventListener('click', async () => {
+      state.dailyTask = task;
+      closeDialog('dailyTasksDialog');
+      await loadVideos();
+      await selectVideo(task.video_id);
+    });
+    list.appendChild(row);
+  });
+}
+
 async function loadDailyTask() {
   const banner = $('dailyTaskBanner');
   if (!banner) return;
@@ -288,15 +320,22 @@ async function loadDailyTask() {
       banner.onclick = () => { location.href = '/api/auth/google/login'; };
       return;
     }
-    const task = await api('/api/daily/task');
-    state.dailyTask = task;
+
+    const bundle = await api('/api/daily/tasks');
+    state.dailyBundle = bundle;
+
+    if (state.selectedVideo) {
+      state.dailyTask = bundle.tasks.find(x => x.video_id === state.selectedVideo.id) || null;
+      applyDailyTaskToVideo();
+    }
+
     banner.classList.remove('hidden');
-    banner.textContent = `Задание дня${task.grammar_topic ? ' (' + task.grammar_topic + ')' : ''}`;
-    banner.onclick = async () => {
-      await loadVideos();
-      await selectVideo(task.video_id);
+    banner.textContent = `Задание дня${bundle.grammar_topic ? ' (' + bundle.grammar_topic + ')' : ''} · ${bundle.completed}/${bundle.total}`;
+    banner.onclick = () => {
+      renderDailyBundle();
+      $('dailyTasksDialog').showModal();
     };
-    if (state.selectedVideo?.id === task.video_id) applyDailyTaskToVideo();
+    renderDailyBundle();
   } catch (e) {
     banner.classList.remove('hidden');
     banner.textContent = 'Задание дня недоступно';
@@ -315,6 +354,7 @@ async function sendDailyCompletion() {
       body:JSON.stringify({
         date: state.dailyTask.date,
         video_id: state.selectedVideo.id,
+        sheet_row: state.dailyTask.sheet_row,
         time_spent_seconds: Math.round(state.timeSpentSeconds),
         completed_highlights: completedHighlights(),
         looked_up_words: events.map(x => x.word),
@@ -456,6 +496,7 @@ function renderLibrary() {
 async function selectVideo(id) {
   const v = state.videos.find(x => x.id === id) || await api(`/api/videos/${id}`);
   state.selectedVideo = v;
+  if (state.dailyBundle) state.dailyTask = state.dailyBundle.tasks.find(x => x.video_id === v.id) || null;
   state.currentPhraseIndex = -1;
   state.dictionaryPhraseId = null;
   state.stats = {lookups: 0, phraseJumps: 0, loops: 0};
@@ -1601,7 +1642,7 @@ $('exportAnki').addEventListener('click', () => {
 });
 
 // Close sheet dialogs when tapping the dark backdrop.
-for (const id of ['menuDialog','subtitleDialog','libraryDialog','transcriptDialog','dictionaryDialog','savedDialog','dictionaryManagerDialog','deleteLessonDialog','ankiDialog']) {
+for (const id of ['menuDialog','subtitleDialog','libraryDialog','transcriptDialog','dictionaryDialog','savedDialog','dictionaryManagerDialog','deleteLessonDialog','ankiDialog','dailyTasksDialog']) {
   const d = $(id);
   d?.addEventListener('click', ev => {
     if (ev.target === d) d.close();
@@ -1623,6 +1664,7 @@ $('menuAnki')?.addEventListener('click', () => {
   refreshPendingAnki().catch(() => {});
 });
 $('ankiDialogClose')?.addEventListener('click', () => closeDialog('ankiDialog'));
+$('dailyTasksClose')?.addEventListener('click', () => closeDialog('dailyTasksDialog'));
 $('ankiHost')?.addEventListener('change', e => localStorage.setItem('lexiquestAnkiHost', e.target.value.trim() || 'http://localhost:8765'));
 $('ankiTest')?.addEventListener('click', async () => {
   localStorage.setItem('lexiquestAnkiHost', $('ankiHost').value.trim() || 'http://localhost:8765');
