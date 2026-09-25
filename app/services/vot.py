@@ -257,71 +257,228 @@ def _interval_overlap(a: dict, b: dict) -> float:
     return max(0.0, min(float(a["end"]), float(b["end"])) - max(float(a["start"]), float(b["start"])))
 
 
+def _is_terminal(text: str) -> bool:
+    return bool(re.search(r"[.!?…][\"'»”)]*$", str(text or "").strip()))
+
+
+def _is_dangling_fragment(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    words = re.findall(r"\w+", value, flags=re.UNICODE)
+    if len(words) > 5:
+        return False
+    if re.search(r"[,;:][\"'»”)]*$", value):
+        return True
+    lowered = value.casefold()
+    dangling_starts = (
+        "и ", "но ", "а ", "или ", "что ", "чтобы ", "потому что ",
+        "если ", "хотя ", "когда ", "пока ", "жаль", "вообще-то",
+    )
+    return any(lowered == item.strip() or lowered.startswith(item) for item in dangling_starts)
+
+
+def _target_units(target: list[dict]) -> list[dict]:
+    """Split translated cues into punctuation-aware units with approximate time spans."""
+    out: list[dict] = []
+    for cue in target:
+        text = str(cue.get("text") or "").strip()
+        units = _sentence_units(text)
+        if not units:
+            continue
+        start = float(cue["start"])
+        end = float(cue["end"])
+        duration = max(0.01, end - start)
+        weights = [max(1, len(re.findall(r"\w+", u, flags=re.UNICODE))) for u in units]
+        total = float(sum(weights)) or 1.0
+        cursor = start
+        for idx, (unit, weight) in enumerate(zip(units, weights)):
+            if idx == len(units) - 1:
+                unit_end = end
+            else:
+                unit_end = cursor + duration * (weight / total)
+            out.append({
+                "text": unit.strip(),
+                "start": cursor,
+                "end": max(cursor + 0.01, unit_end),
+            })
+            cursor = unit_end
+            total -= weight
+            duration = max(0.01, end - cursor)
+    return out
+
+
+def _group_alignment_score(source_cue: dict, units: list[dict]) -> float:
+    """Score one monotonic assignment of translated units to one source cue."""
+    if not units:
+        return -3.0
+
+    s_start = float(source_cue["start"])
+    s_end = float(source_cue["end"])
+    s_duration = max(0.05, s_end - s_start)
+    s_mid = (s_start + s_end) / 2
+
+    t_start = float(units[0]["start"])
+    t_end = float(units[-1]["end"])
+    t_duration = max(0.05, t_end - t_start)
+    t_mid = (t_start + t_end) / 2
+
+    overlap = max(0.0, min(s_end, t_end) - max(s_start, t_start))
+    overlap_score = (overlap / s_duration) * 3.0 + (overlap / t_duration) * 2.0
+    distance_penalty = min(6.0, abs(s_mid - t_mid)) * 0.45
+
+    source_text = str(source_cue.get("text") or "").strip()
+    target_text = " ".join(str(u.get("text") or "").strip() for u in units).strip()
+
+    boundary_score = 0.0
+    source_terminal = _is_terminal(source_text)
+    target_terminal = _is_terminal(target_text)
+    if source_terminal and target_terminal:
+        boundary_score += 4.0
+    elif source_terminal and not target_terminal:
+        boundary_score -= 3.0
+    elif not source_terminal and target_terminal:
+        boundary_score += 0.5
+
+    dangling_penalty = 5.0 if _is_dangling_fragment(target_text) else 0.0
+
+    source_words = max(1, len(re.findall(r"\w+", source_text, flags=re.UNICODE)))
+    target_words = max(1, len(re.findall(r"\w+", target_text, flags=re.UNICODE)))
+    ratio = target_words / source_words
+    length_score = max(-2.0, 1.5 - abs(math.log(max(0.15, min(6.0, ratio)))) * 1.1)
+
+    # Keep the optimizer local: assignments far outside the source timing window
+    # are possible only with a strong sentence-boundary reason, not by default.
+    locality_penalty = 0.0
+    if t_end < s_start - 2.5 or t_start > s_end + 2.5:
+        locality_penalty = 8.0
+
+    return overlap_score + boundary_score + length_score - distance_penalty - dangling_penalty - locality_penalty
+
+
+def _dp_refine_translation_alignment(source: list[dict], target: list[dict]) -> list[str]:
+    """Monotonic DP refinement using time + sentence boundaries + local context.
+
+    Source cue timings stay canonical. The DP only decides which translated
+    sentence/clause units belong to each source cue.
+    """
+    units = _target_units(target)
+    if not source:
+        return []
+    if not units:
+        return [""] * len(source)
+
+    n = len(source)
+    m = len(units)
+    max_take = 6
+    neg_inf = -10**12
+
+    # dp[i][j] = best score after assigning first j target units to first i source cues.
+    dp = [[neg_inf] * (m + 1) for _ in range(n + 1)]
+    back: list[list[tuple[int, int] | None]] = [[None] * (m + 1) for _ in range(n + 1)]
+    dp[0][0] = 0.0
+
+    for i in range(n):
+        for j in range(m + 1):
+            base = dp[i][j]
+            if base <= neg_inf / 2:
+                continue
+
+            # Allow an untranslated source cue, but penalize it.
+            if base - 3.0 > dp[i + 1][j]:
+                dp[i + 1][j] = base - 3.0
+                back[i + 1][j] = (j, 0)
+
+            for take in range(1, min(max_take, m - j) + 1):
+                group = units[j : j + take]
+                score = _group_alignment_score(source[i], group)
+
+                # Discourage swallowing many independently punctuated sentences
+                # into one short source cue unless timings strongly support it.
+                terminal_inside = sum(1 for u in group[:-1] if _is_terminal(u["text"]))
+                score -= terminal_inside * 1.2
+
+                candidate = base + score
+                if candidate > dp[i + 1][j + take]:
+                    dp[i + 1][j + take] = candidate
+                    back[i + 1][j + take] = (j, take)
+
+    # Prefer consuming every translated unit. Only fall back to a partial path
+    # when the local max_take bound made a full path impossible.
+    if dp[n][m] > neg_inf / 2:
+        best_j = m
+    else:
+        best_j = max(range(m + 1), key=lambda j: dp[n][j] - (m - j) * 6.0)
+    assignments: list[list[dict]] = [[] for _ in range(n)]
+    i, j = n, best_j
+    while i > 0:
+        step = back[i][j]
+        if step is None:
+            i -= 1
+            continue
+        prev_j, take = step
+        if take:
+            assignments[i - 1] = units[prev_j:j]
+        j = prev_j
+        i -= 1
+
+    # Rare leftover units are attached to the final source cue rather than lost.
+    if best_j < m and assignments:
+        assignments[-1].extend(units[best_j:])
+
+    return [
+        " ".join(str(u.get("text") or "").strip() for u in group if str(u.get("text") or "").strip()).strip()
+        for group in assignments
+    ]
+
+
 def build_synced_phrase_pairs(source_cues: list[dict], target_cues: list[dict]) -> list[dict]:
     """Build one canonical study timeline from VOT source + target tracks.
 
-    Every target cue contributes only to source cues it actually overlaps. If a
-    translated cue spans several source cues, its text is split in chronological
-    order. If several translated cues fall inside one source cue, they are joined.
-    This handles both coarse and fine subtitle segmentation without mixing two
-    unrelated timing systems.
+    Source timings are authoritative. Target text is aligned monotonically with
+    dynamic programming using temporal overlap, sentence/clause boundaries,
+    length balance and penalties for dangling fragments. This handles different
+    EN/RU subtitle segmentation without changing audio/card boundaries.
     """
     source = _normalize_bridge_cues(source_cues)
     target = _normalize_bridge_cues(target_cues)
     if not source:
         return []
 
-    contributions: dict[int, list[tuple[float, str]]] = defaultdict(list)
-
-    for t in target:
-        overlaps: list[tuple[int, float]] = []
-        for i, s in enumerate(source):
-            ov = _interval_overlap(s, t)
-            if ov > 0.02:
-                overlaps.append((i, ov))
-
-        if not overlaps:
-            t_mid = (float(t["start"]) + float(t["end"])) / 2
-            nearest = min(
-                range(len(source)),
-                key=lambda i: abs(((float(source[i]["start"]) + float(source[i]["end"])) / 2) - t_mid),
-            )
-            s_mid = (float(source[nearest]["start"]) + float(source[nearest]["end"])) / 2
-            if abs(s_mid - t_mid) <= 1.5:
-                overlaps = [(nearest, 1.0)]
-
-        if not overlaps:
-            continue
-
-        indexes = [i for i, _ in overlaps]
-        if len(indexes) == 1:
-            contributions[indexes[0]].append((float(t["start"]), str(t["text"]).strip()))
-            continue
-
-        src_slice = [source[i] for i in indexes]
-        chunks = _split_text_for_cues(str(t["text"]), src_slice)
-        for i, chunk in zip(indexes, chunks):
-            if chunk.strip():
-                contributions[i].append((float(t["start"]), chunk.strip()))
+    refined = _dp_refine_translation_alignment(source, target)
 
     pairs: list[dict] = []
     for i, s in enumerate(source):
-        parts = [text for _, text in sorted(contributions.get(i, []), key=lambda x: x[0]) if text]
-        # Avoid duplicate text when VOT exposes repeated/cumulative adjacent cues.
-        compact: list[str] = []
-        for text in parts:
-            if compact and text == compact[-1]:
-                continue
-            if compact and text.startswith(compact[-1] + " "):
-                text = text[len(compact[-1]):].strip()
-            if text:
-                compact.append(text)
         pairs.append({
             "start": float(s["start"]),
             "end": float(s["end"]),
             "source_text": str(s["text"]).strip(),
-            "translated_text": " ".join(compact).strip(),
+            "translated_text": refined[i] if i < len(refined) else "",
         })
+
+    # Conservative safety-net for a common remaining boundary artifact:
+    # "Sentence. Жаль," / "что ..." -> "Sentence." / "Жаль, что ..."
+    for i in range(len(pairs) - 1):
+        current = str(pairs[i].get("translated_text") or "").strip()
+        following = str(pairs[i + 1].get("translated_text") or "").strip()
+        if not current or not following:
+            continue
+
+        match = re.match(
+            r"^(?P<main>.+[.!?…])\s+(?P<tail>[^.!?…]{1,48}[,:;])$",
+            current,
+            flags=re.UNICODE,
+        )
+        if not match:
+            continue
+
+        tail = match.group("tail").strip()
+        if len(re.findall(r"\w+", tail, flags=re.UNICODE)) > 5:
+            continue
+
+        pairs[i]["translated_text"] = match.group("main").strip()
+        pairs[i + 1]["translated_text"] = f"{tail} {following}".strip()
+
     return pairs
 
 

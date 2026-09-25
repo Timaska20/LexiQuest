@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import hashlib
 import re
 from pathlib import Path
@@ -8,7 +9,8 @@ import genanki
 
 from .media import extract_audio
 
-MODEL_ID = 1918042702
+MODEL_ID = 1918042703
+ANKICONNECT_MODEL_NAME = "LexiQuest Type Answer"
 
 MODEL = genanki.Model(
     MODEL_ID,
@@ -16,6 +18,7 @@ MODEL = genanki.Model(
     fields=[
         {"name": "SourceWord"},
         {"name": "TargetWord"},
+        {"name": "Pronunciation"},
         {"name": "SourcePhrase"},
         {"name": "TargetPhrase"},
         {"name": "Audio"},
@@ -34,6 +37,7 @@ MODEL = genanki.Model(
 {{FrontSide}}
 <hr>
 <div class="word target-word">{{TargetWord}}</div>
+<div class="pronunciation">{{Pronunciation}}</div>
 <div class="context target-context">{{TargetPhrase}}</div>
 """,
         }
@@ -42,6 +46,7 @@ MODEL = genanki.Model(
 .card { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; font-size: 20px; text-align: center; color: #111; background: #fff; padding: 12px; }
 .word { font-size: 34px; font-weight: 800; margin: 16px 0; }
 .target-word { color: #563fd8; }
+.pronunciation { color: #666; font-size: 18px; margin-top: -8px; }
 .context { font-size: 19px; line-height: 1.45; margin: 16px auto; max-width: 720px; }
 .target-context { color: #555; }
 .audio { margin-top: 14px; }
@@ -89,6 +94,7 @@ def build_selected_deck(video, cards, phrases_by_id: dict[int, object], video_pa
             fields=[
                 card.source_word,
                 card.target_word,
+                f"[{(card.pronunciation or '').strip('[]/')}]" if getattr(card, "pronunciation", None) else "",
                 source_phrase,
                 target_phrase,
                 f"[sound:{clip_name}]",
@@ -104,3 +110,59 @@ def build_selected_deck(video, cards, phrases_by_id: dict[int, object], video_pa
     output_path.parent.mkdir(parents=True, exist_ok=True)
     package.write_to_file(str(output_path))
     return output_path
+
+
+
+def blank_word_in_context(source_phrase: str, source_word: str) -> str:
+    """Return a plain Front field for Basic (type in the answer).
+
+    The model's type-in behavior belongs in its card template; field values
+    should not contain nested {{type:...}} template syntax.
+    """
+    phrase = source_phrase or source_word
+    if not source_word:
+        return phrase
+    pattern = re.compile(re.escape(source_word), re.IGNORECASE)
+    return pattern.sub("[…]", phrase, count=1)
+
+
+def build_ankiconnect_note(card, audio_filename: str | None = None) -> dict:
+    source_word_raw = card.source_word or ""
+    source_word = html.escape(source_word_raw)
+    source_phrase_raw = (getattr(card, "source_phrase", None) or "").strip()
+    target_phrase_raw = (getattr(card, "target_phrase", None) or "").strip()
+    source_phrase = html.escape(source_phrase_raw)
+    target_phrase = html.escape(target_phrase_raw)
+    target_word = html.escape(card.target_word or "")
+    pronunciation = html.escape((getattr(card, "pronunciation", None) or "").strip())
+
+    front_parts = [f"<div class='lq-cloze'>{blank_word_in_context(source_phrase_raw, source_word_raw)}</div>"]
+    if target_phrase:
+        front_parts.append(f"<div class='lq-hint'>{target_phrase}</div>")
+    front_parts.append("<div class='lq-prompt'><small>Введите пропущенное слово:</small></div>")
+
+    back_parts = []
+    if source_phrase:
+        back_parts.append(f"<div class='lq-sentence'>{source_phrase}</div>")
+    if target_phrase:
+        back_parts.append(f"<div class='lq-translation'>{target_phrase}</div>")
+    back_parts.append("<hr>")
+    back_parts.append(f"<b>{source_word}</b>")
+    if pronunciation:
+        back_parts.append(f"[{pronunciation.strip('[]/')}]")
+    if target_word:
+        back_parts.append(target_word)
+    if audio_filename:
+        back_parts.append(f"[sound:{audio_filename}]")
+
+    return {
+        "deckName": "LexiQuest",
+        "modelName": ANKICONNECT_MODEL_NAME,
+        "fields": {
+            "Front": "<br>".join(front_parts),
+            "Answer": source_word_raw,
+            "Back": "<br>".join(back_parts),
+        },
+        "options": {"allowDuplicate": False},
+        "tags": ["lexiquest"],
+    }

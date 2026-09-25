@@ -7,7 +7,7 @@
   <title>LexiQuest Cake</title>
   <link rel="manifest" href="/assets/manifest.webmanifest" />
   <link rel="icon" href="/assets/icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/assets/styles.css?v=0.10" />
+  <link rel="stylesheet" href="/assets/styles.css?v=0.11" />
 </head>
 <body>
   <div class="app-shell">
@@ -17,6 +17,7 @@
         <div class="brand"><span class="brand-dot"></span>LexiQuest <strong>Cake</strong></div>
         <div class="subtle desktop-only">self-hosted language player</div>
       </div>
+      <button id="dailyTaskBanner" class="daily-task-banner hidden" type="button">Задание дня</button>
       <button id="addOpen" class="btn primary top-add">＋ Видео</button>
     </header>
 
@@ -49,6 +50,7 @@
 
             <div class="video-wrap">
               <video id="player" playsinline preload="metadata" controls></video>
+              <div id="recommendedTimeline" class="recommended-timeline hidden" aria-hidden="true"></div>
 
               <div class="video-floating-top">
                 <button id="menuOpen" class="round-control" aria-label="Меню">⋮</button>
@@ -64,6 +66,14 @@
                 <button id="modeStudyMobile" class="mode-pill">Учить</button>
                 <button id="savedBadge" class="saved-badge" aria-label="Сохранённые слова">♡ <span class="saved-count">0</span></button>
               </div>
+            </div>
+
+            <div id="recommendedMoments" class="recommended-block hidden">
+              <div class="recommended-head">
+                <strong>Рекомендуемые моменты</strong>
+                <label class="recommended-only"><input id="recommendedOnly" type="checkbox" /> Смотреть только рекомендованное</label>
+              </div>
+              <div id="recommendedChips" class="recommended-chips"></div>
             </div>
 
             <div class="desktop-modebar desktop-only">
@@ -138,6 +148,7 @@
         <button type="button" id="menuSaved" class="menu-row"><span>♡</span><div><strong>Слова урока</strong><small><span class="saved-count">0</span> сохранено</small></div></button>
         <button type="button" id="menuVot" class="menu-row"><span>V</span><div><strong>Субтитры VOT</strong><small id="menuVotStatus">перегенерировать · язык речи / auto</small></div></button>
         <button type="button" id="menuDictionaries" class="menu-row"><span>⌕</span><div><strong>Словари</strong><small>загрузить StarDict с телефона или ПК</small></div></button>
+        <button type="button" id="menuAnki" class="menu-row"><span>A</span><div><strong>AnkiConnect</strong><small id="menuAnkiStatus">localhost:8765 · проверка</small></div></button>
         <button type="button" id="menuAddVideo" class="menu-row"><span>＋</span><div><strong>Добавить видео</strong><small>URL или файл</small></div></button>
         <button type="button" id="menuFinish" class="menu-row accent-row"><span>✓</span><div><strong>Завершить урок</strong><small>статистика и экспорт Anki</small></div></button>
         <button type="button" id="menuDeleteLesson" class="menu-row danger-row"><span>⌫</span><div><strong>Удалить урок</strong><small>видео, субтитры и сохранённые слова</small></div></button>
@@ -351,6 +362,34 @@
     </div>
   </dialog>
 
+  <dialog id="dailyTasksDialog" class="dialog">
+    <div class="dialog-card">
+      <div class="section-title-row">
+        <div><div class="subtle">План на день</div><h2 id="dailyTasksTitle">Задание дня</h2></div>
+        <button id="dailyTasksClose" class="icon-btn" type="button">✕</button>
+      </div>
+      <div id="dailyTasksProgress" class="subtle"></div>
+      <div id="dailyTasksList" class="daily-tasks-list"></div>
+    </div>
+  </dialog>
+
+  <dialog id="ankiDialog" class="dialog">
+    <div class="dialog-card">
+      <div class="section-title-row">
+        <div><div class="subtle">Desktop / VPN</div><h2>AnkiConnect</h2></div>
+        <button id="ankiDialogClose" class="icon-btn" type="button">✕</button>
+      </div>
+      <label>AnkiConnect Host</label>
+      <input id="ankiHost" value="http://localhost:8765" placeholder="http://localhost:8765" />
+      <div class="subtle">Для другого ПК можно указать LAN/Tailscale адрес. В AnkiConnect разреши origin LexiQuest (или "*" только в доверенной сети).</div>
+      <div class="inline-actions">
+        <button id="ankiTest" type="button" class="btn ghost">Проверить</button>
+        <button id="ankiSyncPending" type="button" class="btn primary">Синхронизировать очередь</button>
+      </div>
+      <div id="ankiStatus" class="subtle"></div>
+    </div>
+  </dialog>
+
   <dialog id="lessonDialog" class="dialog">
     <form method="dialog" class="dialog-card lesson-summary">
       <div class="section-title-row">
@@ -367,12 +406,13 @@
         <div class="stat-box"><strong id="statLoops">0</strong><span>повторов loop</span></div>
       </div>
       <div id="summaryWords" class="summary-words"></div>
-      <button id="exportAnki" type="button" class="btn primary full">Экспортировать в Anki</button>
+      <button id="syncAnkiNow" type="button" class="btn primary full">Отправить сохранённые слова в AnkiConnect</button>
+      <button id="exportAnki" type="button" class="btn ghost full">Скачать .apkg</button>
       <div class="subtle summary-note">В Anki попадут только сохранённые слова: слово + перевод словаря, фраза + её перевод и локальный аудиоклип.</div>
     </form>
   </dialog>
 
-  <script src="/assets/app.js?v=0.10" defer></script>
+  <script src="/assets/app.js?v=0.11" defer></script>
   <datalist id="sourceLanguageCodes">
     <option value="auto">Автоопределение VOT</option>
     <option value="en">English</option>
